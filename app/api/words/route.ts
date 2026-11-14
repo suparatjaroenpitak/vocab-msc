@@ -7,8 +7,8 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const mode = searchParams.get("mode") || "all";
   const query = mode === "due"
-    ? "SELECT * FROM words WHERE user_email = ? AND due_at <= ? ORDER BY due_at ASC, id DESC"
-    : "SELECT * FROM words WHERE user_email = ? ORDER BY created_at DESC, id DESC";
+    ? "SELECT id, term, part_of_speech, definition, example, interval_days, due_at, review_count, correct_count, last_reviewed, created_at FROM words WHERE user_email = ? AND due_at <= ? ORDER BY due_at ASC, id DESC"
+    : "SELECT id, term, part_of_speech, definition, example, interval_days, due_at, review_count, correct_count, last_reviewed, created_at FROM words WHERE user_email = ? ORDER BY created_at DESC, id DESC";
   const words = getDb().prepare(query).all(userEmail, ...(mode === "due" ? [new Date().toISOString()] : []));
   return NextResponse.json(words);
 }

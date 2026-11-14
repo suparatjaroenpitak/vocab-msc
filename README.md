@@ -14,7 +14,7 @@ npm run dev
 
 ## Google OAuth
 
-สร้าง OAuth Client ใน Google Cloud แล้วใส่ค่า `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` และ `NEXTAUTH_SECRET` ใน `.env.local` จากนั้นเพิ่ม callback URL:
+สร้าง OAuth Client ใน Google Cloud แล้วใส่ค่า `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `NEXTAUTH_SECRET` และ `NEXTAUTH_URL` ใน `.env.local` จากนั้นเพิ่ม callback URL:
 
 ```text
 http://localhost:3000/api/auth/callback/google

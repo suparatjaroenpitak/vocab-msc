@@ -37,7 +37,7 @@ export function parseVocabulary(text: string): ParsedWord[] {
   for (const rawLine of text.replace(/\r/g, "").split("\n")) {
     let line = rawLine.replace(/[\\]+$/g, "").trim();
     if (!line || /^(-{2,}|={2,}|คำศัพท์|vocabulary|word\s*,)/i.test(line)) continue;
-    line = line.replace(/^\s*(?:\d+\s*[.)]|[-*•])\s*/, "");
+    line = line.replace(/^\s*(?:\d+\s*\\?[.)]|[-*•])\s*/, "");
 
     const separator = line.match(/\s+(?:-|–|—)\s+|\t+|\s+:\s+/);
     if (!separator || separator.index === undefined) continue;
