@@ -29,6 +29,7 @@ import {
   X,
   Zap
 } from "lucide-react";
+import { requestJson } from "@/lib/request-json";
 import type { ReviewRating, Word } from "@/lib/types";
 
 type Tab = "dashboard" | "review" | "quiz" | "import";
@@ -110,7 +111,7 @@ export default function HomePage() {
       setLoading(true);
     }
     try {
-      const [allResponse, dueResponse] = await Promise.all([fetch("/api/words"), fetch("/api/words?mode=due")]);
+      const [allResponse, dueResponse] = await Promise.all([fetch("/api/words", { signal: AbortSignal.timeout(30_000) }), fetch("/api/words?mode=due", { signal: AbortSignal.timeout(30_000) })]);
       if (!allResponse.ok || !dueResponse.ok) throw new Error("โหลดคลังคำศัพท์ไม่สำเร็จ");
       const nextWords = (await allResponse.json()) as Word[];
       const nextDueWords = (await dueResponse.json()) as Word[];
@@ -259,9 +260,40 @@ function ImportView({ onDone }: { onDone: (message: string) => Promise<void> }) 
   const [manual, setManual] = useState({ term: "", partOfSpeech: "", definition: "" });
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<"paste" | "manual">("paste");
-  async function importText() { setBusy(true); const response = await fetch("/api/words/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) }); const payload = await response.json() as { imported?: number; error?: string }; setBusy(false); if (!response.ok) { window.alert(payload.error || "นำเข้าไม่สำเร็จ"); return; } setText(""); await onDone(`นำเข้าคำศัพท์สำเร็จ ${payload.imported} คำ`); }
-  async function addManual() { setBusy(true); const response = await fetch("/api/words", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(manual) }); const payload = await response.json() as { error?: string }; setBusy(false); if (!response.ok) { window.alert(payload.error || "เพิ่มคำศัพท์ไม่สำเร็จ"); return; } setManual({ term: "", partOfSpeech: "", definition: "" }); await onDone("เพิ่มคำศัพท์ 1 คำแล้ว"); }
-  return <div className="py-10 lg:py-14"><PageTitle eyebrow="build your library" title="เพิ่มคำศัพท์ให้เป็นของคุณ" description="วางรายการยาว ๆ จากหนังสือหรือโน้ตได้เลย ระบบจะอ่านเลขลำดับ, part of speech และคำแปลให้อัตโนมัติ" /><div className="mt-9 flex gap-2 rounded-2xl bg-ink/5 p-1.5 sm:w-fit"><button onClick={() => setTab("paste")} className={`rounded-xl px-4 py-2.5 text-sm font-bold transition ${tab === "paste" ? "bg-white text-ink shadow-sm" : "text-ink/45"}`}><Upload size={15} className="mr-2 inline" />วางรายการ</button><button onClick={() => setTab("manual")} className={`rounded-xl px-4 py-2.5 text-sm font-bold transition ${tab === "manual" ? "bg-white text-ink shadow-sm" : "text-ink/45"}`}><Plus size={15} className="mr-2 inline" />เพิ่มทีละคำ</button></div>{tab === "paste" ? <div className="mt-5 grid gap-5 lg:grid-cols-[1.15fr_.85fr]"><section className="rounded-[28px] border border-ink/10 bg-white p-5 shadow-card sm:p-7"><div className="flex items-center justify-between"><label className="text-sm font-bold">รายการคำศัพท์</label><button onClick={() => setText(sampleImport)} className="text-xs font-bold text-coral hover:underline">ใช้ตัวอย่าง</button></div><textarea value={text} onChange={(event) => setText(event.target.value)} placeholder={`airborne (adj.) - ทางอากาศ, ทหารพลร่ม\nlanding (n.) - การลงจอด`} className="mt-4 min-h-[340px] w-full resize-none rounded-2xl border border-ink/10 bg-cream p-4 text-sm leading-7 outline-none transition placeholder:text-ink/25 focus:border-coral focus:ring-4 focus:ring-coral/10" /><div className="mt-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><p className="text-xs leading-5 text-ink/40">รองรับเลขลำดับ, ไม่มีเลขลำดับ, tab-separated และ JSON</p><button disabled={!text.trim() || busy} onClick={() => void importText()} className="flex items-center justify-center gap-2 rounded-2xl bg-coral px-5 py-3 text-sm font-bold text-white transition hover:bg-coral/90 disabled:cursor-not-allowed disabled:opacity-40"><Import size={16} />{busy ? "กำลังนำเข้า…" : "นำเข้าคำศัพท์"}</button></div></section><section className="rounded-[28px] bg-ink p-6 text-white shadow-soft sm:p-8"><span className="grid h-11 w-11 place-items-center rounded-2xl bg-white/10 text-coral"><Sparkles size={19} /></span><h2 className="mt-8 font-display text-2xl font-bold">นำเข้าได้หลายแบบ</h2><div className="mt-7 space-y-5 text-sm leading-6 text-white/60"><div><p className="font-bold text-white">แบบมีเลขลำดับ</p><p>1. airborne (adj.) - ทางอากาศ</p></div><div><p className="font-bold text-white">แบบไม่มีเลขลำดับ</p><p>landing (n.) - การลงจอด</p></div><div><p className="font-bold text-white">แบบ JSON</p><p>[&#123; "term": "cover", "definition": "ที่กำบัง" &#125;]</p></div></div></section></div> : <section className="mt-5 max-w-2xl rounded-[28px] border border-ink/10 bg-white p-5 shadow-card sm:p-8"><div className="grid gap-5 sm:grid-cols-2"><Field label="คำศัพท์" value={manual.term} placeholder="e.g. cover" onChange={(value) => setManual({ ...manual, term: value })} /><Field label="ชนิดคำ" value={manual.partOfSpeech} placeholder="e.g. n. / v." onChange={(value) => setManual({ ...manual, partOfSpeech: value })} /></div><div className="mt-5"><Field label="คำแปล / ความหมาย" value={manual.definition} placeholder="ที่กำบัง, คุ้มกัน" onChange={(value) => setManual({ ...manual, definition: value })} multiline /></div><button disabled={!manual.term.trim() || !manual.definition.trim() || busy} onClick={() => void addManual()} className="mt-6 flex items-center gap-2 rounded-2xl bg-ink px-5 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"><Plus size={16} />เพิ่มเข้าคลัง</button></section>}</div>;
+  const [error, setError] = useState<string | null>(null);
+  async function importText() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const payload = await requestJson<{ imported: number }>("/api/words/import", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text })
+      });
+      setText("");
+      await onDone(`นำเข้าคำศัพท์สำเร็จ ${payload.imported} คำ`);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "นำเข้าไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function addManual() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await requestJson("/api/words", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(manual)
+      });
+      setManual({ term: "", partOfSpeech: "", definition: "" });
+      await onDone("เพิ่มคำศัพท์ 1 คำแล้ว");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "เพิ่มคำศัพท์ไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return <div className="py-10 lg:py-14"><PageTitle eyebrow="build your library" title="เพิ่มคำศัพท์ให้เป็นของคุณ" description="วางรายการยาว ๆ จากหนังสือหรือโน้ตได้เลย ระบบจะอ่านเลขลำดับ, part of speech และคำแปลให้อัตโนมัติ" />{error && <p role="alert" className="mt-5 rounded-2xl border border-coral/30 bg-coral/10 p-4 text-sm text-ink">{error}</p>}<div className="mt-9 flex gap-2 rounded-2xl bg-ink/5 p-1.5 sm:w-fit"><button onClick={() => setTab("paste")} className={`rounded-xl px-4 py-2.5 text-sm font-bold transition ${tab === "paste" ? "bg-white text-ink shadow-sm" : "text-ink/45"}`}><Upload size={15} className="mr-2 inline" />วางรายการ</button><button onClick={() => setTab("manual")} className={`rounded-xl px-4 py-2.5 text-sm font-bold transition ${tab === "manual" ? "bg-white text-ink shadow-sm" : "text-ink/45"}`}><Plus size={15} className="mr-2 inline" />เพิ่มทีละคำ</button></div>{tab === "paste" ? <div className="mt-5 grid gap-5 lg:grid-cols-[1.15fr_.85fr]"><section className="rounded-[28px] border border-ink/10 bg-white p-5 shadow-card sm:p-7"><div className="flex items-center justify-between"><label className="text-sm font-bold">รายการคำศัพท์</label><button onClick={() => setText(sampleImport)} className="text-xs font-bold text-coral hover:underline">ใช้ตัวอย่าง</button></div><textarea value={text} onChange={(event) => setText(event.target.value)} placeholder={`airborne (adj.) - ทางอากาศ, ทหารพลร่ม\nlanding (n.) - การลงจอด`} className="mt-4 min-h-[340px] w-full resize-none rounded-2xl border border-ink/10 bg-cream p-4 text-sm leading-7 outline-none transition placeholder:text-ink/25 focus:border-coral focus:ring-4 focus:ring-coral/10" /><div className="mt-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><p className="text-xs leading-5 text-ink/40">รองรับเลขลำดับ, ไม่มีเลขลำดับ, tab-separated และ JSON</p><button disabled={!text.trim() || busy} onClick={() => void importText()} className="flex items-center justify-center gap-2 rounded-2xl bg-coral px-5 py-3 text-sm font-bold text-white transition hover:bg-coral/90 disabled:cursor-not-allowed disabled:opacity-40"><Import size={16} />{busy ? "กำลังนำเข้า…" : "นำเข้าคำศัพท์"}</button></div></section><section className="rounded-[28px] bg-ink p-6 text-white shadow-soft sm:p-8"><span className="grid h-11 w-11 place-items-center rounded-2xl bg-white/10 text-coral"><Sparkles size={19} /></span><h2 className="mt-8 font-display text-2xl font-bold">นำเข้าได้หลายแบบ</h2><div className="mt-7 space-y-5 text-sm leading-6 text-white/60"><div><p className="font-bold text-white">แบบมีเลขลำดับ</p><p>1. airborne (adj.) - ทางอากาศ</p></div><div><p className="font-bold text-white">แบบไม่มีเลขลำดับ</p><p>landing (n.) - การลงจอด</p></div><div><p className="font-bold text-white">แบบ JSON</p><p>[&#123; "term": "cover", "definition": "ที่กำบัง" &#125;]</p></div></div></section></div> : <section className="mt-5 max-w-2xl rounded-[28px] border border-ink/10 bg-white p-5 shadow-card sm:p-8"><div className="grid gap-5 sm:grid-cols-2"><Field label="คำศัพท์" value={manual.term} placeholder="e.g. cover" onChange={(value) => setManual({ ...manual, term: value })} /><Field label="ชนิดคำ" value={manual.partOfSpeech} placeholder="e.g. n. / v." onChange={(value) => setManual({ ...manual, partOfSpeech: value })} /></div><div className="mt-5"><Field label="คำแปล / ความหมาย" value={manual.definition} placeholder="ที่กำบัง, คุ้มกัน" onChange={(value) => setManual({ ...manual, definition: value })} multiline /></div><button disabled={!manual.term.trim() || !manual.definition.trim() || busy} onClick={() => void addManual()} className="mt-6 flex items-center gap-2 rounded-2xl bg-ink px-5 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"><Plus size={16} />เพิ่มเข้าคลัง</button></section>}</div>;
 }
 
 function Field({ label, value, placeholder, onChange, multiline }: { label: string; value: string; placeholder: string; onChange: (value: string) => void; multiline?: boolean }) { const className = "mt-2 w-full rounded-2xl border border-ink/10 bg-cream px-4 py-3 text-sm outline-none transition placeholder:text-ink/25 focus:border-coral focus:ring-4 focus:ring-coral/10"; return <label className="block text-sm font-bold">{label}{multiline ? <textarea value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className={`${className} min-h-[130px] resize-none`} /> : <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className={className} />}</label>; }

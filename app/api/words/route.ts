@@ -1,3 +1,5 @@
+import { words as wordTable } from "@/db/schema";
+import { and, eq, lte, asc, desc } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getCurrentUserEmail } from "@/lib/current-user";
 import { getDb } from "@/lib/db";
@@ -6,10 +8,12 @@ export async function GET(request: Request) {
   const userEmail = await getCurrentUserEmail();
   const { searchParams } = new URL(request.url);
   const mode = searchParams.get("mode") || "all";
-  const query = mode === "due"
-    ? "SELECT id, term, part_of_speech, definition, example, interval_days, due_at, review_count, correct_count, last_reviewed, created_at FROM words WHERE user_email = ? AND due_at <= ? ORDER BY due_at ASC, id DESC"
-    : "SELECT id, term, part_of_speech, definition, example, interval_days, due_at, review_count, correct_count, last_reviewed, created_at FROM words WHERE user_email = ? ORDER BY created_at DESC, id DESC";
-  const words = getDb().prepare(query).all(userEmail, ...(mode === "due" ? [new Date().toISOString()] : []));
+  const condition = mode === "due"
+    ? and(eq(wordTable.user_email, userEmail), lte(wordTable.due_at, new Date().toISOString()))
+    : eq(wordTable.user_email, userEmail);
+  const words = await getDb().select().from(wordTable).where(condition).orderBy(
+    ...(mode === "due" ? [asc(wordTable.due_at), desc(wordTable.id)] : [desc(wordTable.created_at), desc(wordTable.id)])
+  );
   return NextResponse.json(words);
 }
 
@@ -21,14 +25,12 @@ export async function POST(request: Request) {
 
   const userEmail = await getCurrentUserEmail();
   const now = new Date().toISOString();
-  getDb().prepare(`
-    INSERT INTO words (user_email, term, part_of_speech, definition, example, due_at, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(user_email, term) DO UPDATE SET
-      part_of_speech = excluded.part_of_speech,
-      definition = excluded.definition,
-      example = excluded.example,
-      updated_at = excluded.updated_at
-  `).run(userEmail, term, body.partOfSpeech?.trim() || "", definition, body.example?.trim() || null, now, now, now);
+  await getDb().insert(wordTable).values({
+    user_email: userEmail, term, part_of_speech: body.partOfSpeech?.trim() || "",
+    definition, example: body.example?.trim() || null, due_at: now, created_at: now, updated_at: now
+  }).onConflictDoUpdate({ target: [wordTable.user_email, wordTable.term], set: {
+    part_of_speech: body.partOfSpeech?.trim() || "", definition,
+    example: body.example?.trim() || null, updated_at: now
+  }});
   return NextResponse.json({ ok: true });
 }
