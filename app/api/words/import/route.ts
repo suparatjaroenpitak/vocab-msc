@@ -1,29 +1,21 @@
 import { NextResponse } from "next/server";
 import { getCurrentUserEmail } from "@/lib/current-user";
-import { getDb } from "@/lib/db";
+import { importWords } from "@/lib/db";
 import { parseVocabulary } from "@/lib/parser";
 
 export async function POST(request: Request) {
-  const body = (await request.json()) as { text?: string };
-  const parsed = parseVocabulary(body.text || "");
-  if (!parsed.length) {
-    return NextResponse.json({ error: "ยังอ่านรายการไม่ได้ ลองใช้รูปแบบ: word (pos) - คำแปล" }, { status: 400 });
+  let body: { text?: unknown };
+  try { body = await request.json(); }
+  catch { return NextResponse.json({ error: "ข้อมูลนำเข้าไม่ถูกต้อง" }, { status: 400 }); }
+  if (!body || typeof body.text !== "string") return NextResponse.json({ error: "กรุณาวางรายการคำศัพท์" }, { status: 400 });
+  if (body.text.length > 500_000) return NextResponse.json({ error: "รายการยาวเกินไป กรุณาแบ่งนำเข้าครั้งละไม่เกิน 500,000 ตัวอักษร" }, { status: 413 });
+  const parsed = parseVocabulary(body.text);
+  if (!parsed.length) return NextResponse.json({ error: "ยังอ่านรายการไม่ได้ ลองใช้รูปแบบ: word (pos) - คำแปล" }, { status: 400 });
+  if (parsed.length > 5000) return NextResponse.json({ error: "กรุณานำเข้าครั้งละไม่เกิน 5,000 คำ" }, { status: 400 });
+  try {
+    const imported = await importWords(await getCurrentUserEmail(), parsed);
+    return NextResponse.json({ imported });
+  } catch {
+    return NextResponse.json({ error: "บันทึกคำศัพท์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }, { status: 500 });
   }
-
-  const userEmail = await getCurrentUserEmail();
-  const now = new Date().toISOString();
-  const db = getDb();
-  const insert = db.prepare(`
-    INSERT INTO words (user_email, term, part_of_speech, definition, due_at, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(user_email, term) DO UPDATE SET
-      part_of_speech = excluded.part_of_speech,
-      definition = excluded.definition,
-      updated_at = excluded.updated_at
-  `);
-  const addWords = db.transaction(() => {
-    for (const word of parsed) insert.run(userEmail, word.term, word.partOfSpeech, word.definition, now, now, now);
-  });
-  addWords();
-  return NextResponse.json({ imported: parsed.length, words: parsed });
 }

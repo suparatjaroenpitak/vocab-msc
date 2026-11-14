@@ -1,0 +1,20 @@
+import { pgTable, serial, text, integer, doublePrecision, uniqueIndex, index } from "drizzle-orm/pg-core";
+
+export const words = pgTable("words", {
+  id: serial("id").primaryKey(),
+  user_email: text("user_email").notNull(),
+  term: text("term").notNull(),
+  part_of_speech: text("part_of_speech").notNull().default(""),
+  definition: text("definition").notNull(),
+  example: text("example"),
+  interval_days: doublePrecision("interval_days").notNull().default(0),
+  due_at: text("due_at").notNull(),
+  review_count: integer("review_count").notNull().default(0),
+  correct_count: integer("correct_count").notNull().default(0),
+  last_reviewed: text("last_reviewed"),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull()
+}, (table) => [
+  uniqueIndex("words_user_term_idx").on(table.user_email, table.term),
+  index("words_due_idx").on(table.user_email, table.due_at)
+]);
