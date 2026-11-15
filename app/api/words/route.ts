@@ -1,7 +1,7 @@
 import { categories as categoryTable, words as wordTable } from "@/db/schema";
 import { and, asc, desc, eq, lte, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { ensureUserCategories, getCategoryIdForWord } from "@/lib/categories";
+import { getCategoryIdForWord, ensureUserCategories } from "@/lib/categories";
 import { getCurrentUserEmail } from "@/lib/current-user";
 import { getDb } from "@/lib/db";
 
@@ -9,31 +9,37 @@ export async function GET(request: Request) {
   const userEmail = await getCurrentUserEmail();
   if (!userEmail) return NextResponse.json({ error: "กรุณาเข้าสู่ระบบด้วย Google ก่อนใช้งาน" }, { status: 401 });
   const db = getDb();
-  await ensureUserCategories(db, userEmail);
   const { searchParams } = new URL(request.url);
   const mode = searchParams.get("mode") || "all";
+  const includeDue = searchParams.get("includeDue") === "1";
   const requestedCategoryId = Number(searchParams.get("categoryId"));
-  const filters = [eq(wordTable.user_email, userEmail)];
-  if (mode === "due") filters.push(lte(wordTable.due_at, new Date().toISOString()));
-  if (Number.isInteger(requestedCategoryId) && requestedCategoryId > 0) filters.push(eq(wordTable.category_id, requestedCategoryId));
-  const condition = filters.length === 1 ? filters[0] : and(...filters);
-  const orderBy = mode === "due" ? [asc(wordTable.due_at), desc(wordTable.id)] : [desc(wordTable.created_at), desc(wordTable.id)];
-  const result = await db.select({
-    id: wordTable.id,
-    term: wordTable.term,
-    part_of_speech: wordTable.part_of_speech,
-    definition: wordTable.definition,
-    category_id: wordTable.category_id,
-    category_name: categoryTable.name,
-    example: wordTable.example,
-    interval_days: wordTable.interval_days,
-    due_at: wordTable.due_at,
-    review_count: wordTable.review_count,
-    correct_count: wordTable.correct_count,
-    last_reviewed: wordTable.last_reviewed,
-    created_at: wordTable.created_at
-  }).from(wordTable).leftJoin(categoryTable, eq(categoryTable.id, wordTable.category_id)).where(condition).orderBy(...orderBy);
-  return NextResponse.json(result);
+  const queryWords = async (dueOnly: boolean) => {
+    const filters = [eq(wordTable.user_email, userEmail)];
+    if (dueOnly) filters.push(lte(wordTable.due_at, new Date().toISOString()));
+    if (dueOnly && Number.isInteger(requestedCategoryId) && requestedCategoryId > 0) filters.push(eq(wordTable.category_id, requestedCategoryId));
+    const condition = filters.length === 1 ? filters[0] : and(...filters);
+    const orderBy = dueOnly ? [asc(wordTable.due_at), desc(wordTable.id)] : [desc(wordTable.created_at), desc(wordTable.id)];
+    return db.select({
+      id: wordTable.id,
+      term: wordTable.term,
+      part_of_speech: wordTable.part_of_speech,
+      definition: wordTable.definition,
+      category_id: wordTable.category_id,
+      category_name: categoryTable.name,
+      example: wordTable.example,
+      interval_days: wordTable.interval_days,
+      due_at: wordTable.due_at,
+      review_count: wordTable.review_count,
+      correct_count: wordTable.correct_count,
+      last_reviewed: wordTable.last_reviewed,
+      created_at: wordTable.created_at
+    }).from(wordTable).leftJoin(categoryTable, eq(categoryTable.id, wordTable.category_id)).where(condition).orderBy(...orderBy);
+  };
+  if (includeDue) {
+    const [words, dueWords] = await Promise.all([queryWords(false), queryWords(true)]);
+    return NextResponse.json({ words, dueWords });
+  }
+  return NextResponse.json(await queryWords(mode === "due"));
 }
 
 export async function POST(request: Request) {

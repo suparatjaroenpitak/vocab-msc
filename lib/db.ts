@@ -2,7 +2,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { categories, words } from "@/db/schema";
 import { and, eq, sql } from "drizzle-orm";
-import { ensureUserCategories, getCategoryIdForWord } from "@/lib/categories";
+import { ensureUserCategories, suggestCategoryName } from "@/lib/categories";
 import type { ParsedWord } from "@/lib/types";
 
 const globalForDb = globalThis as unknown as { postgresPool?: Pool };
@@ -22,12 +22,13 @@ export async function importWords(userEmail: string, parsed: ParsedWord[], reque
   // Deduplicate JSON input too: Postgres cannot update one row twice in a statement.
   const unique = new Map(parsed.map((word) => [word.term, word]));
   const db = getDb();
-  await ensureUserCategories(db, userEmail);
-  const [requestedCategory] = requestedCategoryId ? await db.select({ id: categories.id }).from(categories).where(and(eq(categories.id, requestedCategoryId), eq(categories.user_email, userEmail))).limit(1) : [];
+  const categoryRows = await ensureUserCategories(db, userEmail);
+  const categoryByName = new Map(categoryRows.map((category) => [category.name, category.id]));
+  const requestedCategory = requestedCategoryId ? categoryRows.find((category) => category.id === requestedCategoryId) : undefined;
   const values = await Promise.all(Array.from(unique.values()).map(async (word) => ({
     user_email: userEmail, term: word.term, part_of_speech: word.partOfSpeech,
     definition: word.definition,
-    category_id: await getCategoryIdForWord(db, userEmail, word.term, word.partOfSpeech, word.definition, requestedCategory?.id),
+    category_id: requestedCategory?.id ?? categoryByName.get(suggestCategoryName(word.term, word.partOfSpeech, word.definition)) ?? null,
     due_at: now, created_at: now, updated_at: now
   })));
   await db.insert(words).values(values).onConflictDoUpdate({

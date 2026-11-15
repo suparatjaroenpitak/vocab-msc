@@ -1,5 +1,5 @@
 import { categories, words } from "@/db/schema";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { getDb } from "@/lib/db";
 
 type Db = ReturnType<typeof getDb>;
@@ -17,16 +17,21 @@ export function suggestCategoryName(term: string, partOfSpeech: string, definiti
 
 export async function ensureUserCategories(db: Db, userEmail: string) {
   const now = new Date().toISOString();
-  for (const name of SUGGESTED_CATEGORIES) {
-    await db.insert(categories).values({ user_email: userEmail, name, created_at: now }).onConflictDoNothing({ target: [categories.user_email, categories.name] });
-  }
+  await db.insert(categories).values(SUGGESTED_CATEGORIES.map((name) => ({ user_email: userEmail, name, created_at: now }))).onConflictDoNothing({ target: [categories.user_email, categories.name] });
 
   const categoryRows = await db.select({ id: categories.id, name: categories.name }).from(categories).where(eq(categories.user_email, userEmail));
   const byName = new Map(categoryRows.map((category) => [category.name, category.id]));
   const uncategorized = await db.select({ id: words.id, term: words.term, part_of_speech: words.part_of_speech, definition: words.definition }).from(words).where(and(eq(words.user_email, userEmail), isNull(words.category_id)));
+  const idsByCategory = new Map<number, number[]>();
   for (const word of uncategorized) {
     const categoryId = byName.get(suggestCategoryName(word.term, word.part_of_speech, word.definition));
-    if (categoryId) await db.update(words).set({ category_id: categoryId, updated_at: now }).where(and(eq(words.id, word.id), eq(words.user_email, userEmail)));
+    if (!categoryId) continue;
+    const ids = idsByCategory.get(categoryId) ?? [];
+    ids.push(word.id);
+    idsByCategory.set(categoryId, ids);
+  }
+  for (const [categoryId, ids] of Array.from(idsByCategory.entries())) {
+    await db.update(words).set({ category_id: categoryId, updated_at: now }).where(and(eq(words.user_email, userEmail), inArray(words.id, ids)));
   }
   return categoryRows;
 }

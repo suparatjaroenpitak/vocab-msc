@@ -121,10 +121,11 @@ export default function HomePage() {
     }
     try {
       const categoryQuery = categoryId ? `&categoryId=${categoryId}` : "";
-      const [allResponse, dueResponse] = await Promise.all([fetch("/api/words", { signal: AbortSignal.timeout(30_000) }), fetch(`/api/words?mode=due${categoryQuery}`, { signal: AbortSignal.timeout(30_000) })]);
-      if (!allResponse.ok || !dueResponse.ok) throw new Error("โหลดคลังคำศัพท์ไม่สำเร็จ");
-      const nextWords = (await allResponse.json()) as Word[];
-      const nextDueWords = (await dueResponse.json()) as Word[];
+      const response = await fetch(`/api/words?includeDue=1${categoryQuery}`, { signal: AbortSignal.timeout(30_000) });
+      if (!response.ok) throw new Error("โหลดคลังคำศัพท์ไม่สำเร็จ");
+      const payload = (await response.json()) as { words: Word[]; dueWords: Word[] };
+      const nextWords = payload.words;
+      const nextDueWords = payload.dueWords;
       setWords(nextWords);
       setDueWords(nextDueWords);
       saveWordCache(cacheIdentity, nextWords, nextDueWords);
@@ -141,8 +142,11 @@ export default function HomePage() {
   useEffect(() => {
     if (!learnerKey) return;
     void loadWords(learnerKey, learningCategoryId);
-    void fetch("/api/categories", { signal: AbortSignal.timeout(30_000) }).then((response) => response.json()).then((data) => setCategories(data as Category[]));
   }, [loadWords, learnerKey, learningCategoryId]);
+  useEffect(() => {
+    if (!learnerKey) return;
+    void fetch("/api/categories", { signal: AbortSignal.timeout(30_000) }).then((response) => response.json()).then((data) => setCategories(data as Category[]));
+  }, [learnerKey]);
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(null), 3200);
