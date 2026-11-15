@@ -1,17 +1,33 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Providers } from "@/components/providers";
+import { PWARegister } from "@/components/pwa-register";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "LexiFlow — ฝึกศัพท์อังกฤษให้จำได้จริง",
-  description: "นำเข้าคำศัพท์ ทบทวนแบบ spaced repetition และฝึกควิซในที่เดียว"
+  description: "นำเข้าคำศัพท์ ทบทวนแบบ spaced repetition และฝึกควิซในที่เดียว",
+  applicationName: "LexiFlow",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: { capable: true, title: "LexiFlow", statusBarStyle: "black-translucent" },
+  icons: {
+    icon: [{ url: "/icon-192.png", sizes: "192x192", type: "image/png" }, { url: "/icon-512.png", sizes: "512x512", type: "image/png" }],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }]
+  }
+};
+
+export const viewport: Viewport = {
+  themeColor: "#17233c",
+  colorScheme: "light"
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="th">
       <body>
-        <Providers>{children}</Providers>
+        <Providers>
+          <PWARegister />
+          {children}
+        </Providers>
       </body>
     </html>
   );

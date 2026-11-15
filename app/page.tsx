@@ -32,6 +32,7 @@ import {
 import { requestJson } from "@/lib/request-json";
 import { parseVocabulary } from "@/lib/parser";
 import type { Category, LeaderboardSnapshot, ReviewRating, Word } from "@/lib/types";
+import { PWAInstallButton } from "@/components/pwa-register";
 
 type Tab = "dashboard" | "review" | "quiz" | "fill" | "import" | "leaderboard";
 
@@ -357,6 +358,7 @@ export default function HomePage() {
             <div className="ml-auto flex items-center gap-3">
               <div className="hidden text-right sm:block"><p className="text-xs font-semibold text-ink/40">{session?.user?.email ? "บัญชีของคุณ" : "โหมดทดลอง"}</p><p className="text-sm font-bold">{session?.user?.name || "Guest learner"}</p></div>
               <div className="grid h-10 w-10 place-items-center rounded-2xl bg-coral/15 font-bold text-coral">{session?.user?.name?.slice(0, 1).toUpperCase() || "G"}</div>
+              <PWAInstallButton />
               {session?.user ? <button onClick={() => void signOut({ callbackUrl: "/" })} className="flex items-center gap-1.5 rounded-xl border border-ink/10 bg-white px-3 py-2 text-xs font-bold text-ink/60 transition hover:border-coral/40 hover:text-coral"><LogOut size={14} /> <span className="hidden sm:inline">ออกจากระบบ</span></button> : <button onClick={() => void signIn("google")} className="hidden items-center gap-2 rounded-xl bg-ink px-3 py-2 text-xs font-bold text-white transition hover:bg-ink/90 sm:flex"><LogIn size={14} /> Login with Google</button>}
             </div>
           </header>
