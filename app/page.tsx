@@ -285,7 +285,6 @@ function QuizView({ words, onToast }: { words: Word[]; onToast: (message: string
 }
 
 function FillView({ words, onToast }: { words: Word[]; onToast: (message: string) => void }) {
-  const [mode, setMode] = useState<"letters" | "chunks">("letters");
   const [pool, setPool] = useState<Word[]>([]);
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<string[]>([]);
@@ -293,10 +292,14 @@ function FillView({ words, onToast }: { words: Word[]; onToast: (message: string
   const current = pool[index];
   const parts = useMemo(() => {
     if (!current) return [];
-    const values = mode === "letters" ? Array.from(current.term.replace(/\s/g, "")) : current.term.trim().split(/\s+/);
-    return values.map((text, partIndex) => ({ id: `${partIndex}-${text}`, text }));
-  }, [current, mode]);
-  const answer = selected.map((id) => parts.find((part) => part.id === id)?.text || "").join(mode === "letters" ? "" : " ");
+    const shuffled = Array.from(current.term.replace(/\s/g, ""));
+    for (let partIndex = shuffled.length - 1; partIndex > 0; partIndex -= 1) {
+      const swapIndex = Math.floor(Math.random() * (partIndex + 1));
+      [shuffled[partIndex], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[partIndex]];
+    }
+    return shuffled.map((text, partIndex) => ({ id: `${partIndex}-${text}`, text }));
+  }, [current]);
+  const answer = selected.map((id) => parts.find((part) => part.id === id)?.text || "").join("");
 
   useEffect(() => {
     setPool([...words].sort(() => Math.random() - 0.5));
@@ -312,7 +315,7 @@ function FillView({ words, onToast }: { words: Word[]; onToast: (message: string
 
   function checkAnswer() {
     if (!current || selected.length !== parts.length) return;
-    const normalize = (value: string) => mode === "letters" ? value.toLowerCase().replace(/\s/g, "") : value.toLowerCase().replace(/\s+/g, " ").trim();
+    const normalize = (value: string) => value.toLowerCase().replace(/\s/g, "");
     const correct = normalize(answer) === normalize(current.term);
     setFeedback(correct ? "correct" : "wrong");
     if (correct) onToast("ตอบถูก! เก่งมาก");
@@ -327,7 +330,7 @@ function FillView({ words, onToast }: { words: Word[]; onToast: (message: string
 
   if (!words.length) return <div className="py-20 text-center"><PageTitle eyebrow="fill mode" title="ยังไม่มีคำศัพท์ให้เติม" description="เพิ่มคำศัพท์หรือเปลี่ยนหมวดหมู่การเรียนรู้ก่อนเริ่มโหมดนี้" /></div>;
   if (!current) return null;
-  return <div className="mx-auto max-w-3xl py-10 lg:py-14"><PageTitle eyebrow="fill mode · thai prompt" title="เติมคำจากคำแปลภาษาไทย" description="อ่านโจทย์ภาษาไทย แล้วเลือกตัวอักษรหรือกลุ่มคำให้เรียงเป็นคำศัพท์ภาษาอังกฤษ" /><div className="mt-7 flex gap-2 rounded-2xl bg-ink/5 p-1.5 sm:w-fit"><button onClick={() => { setMode("letters"); setSelected([]); setFeedback(null); }} className={`rounded-xl px-4 py-2.5 text-sm font-bold ${mode === "letters" ? "bg-white text-ink shadow-sm" : "text-ink/45"}`}>เลือกตัวอักษร</button><button onClick={() => { setMode("chunks"); setSelected([]); setFeedback(null); }} className={`rounded-xl px-4 py-2.5 text-sm font-bold ${mode === "chunks" ? "bg-white text-ink shadow-sm" : "text-ink/45"}`}>เลือกกลุ่มคำ</button></div><section className="mt-6 overflow-hidden rounded-[32px] border border-ink/10 bg-white shadow-soft"><div className="bg-ink px-7 py-5 text-white sm:px-10"><div className="flex items-center justify-between"><span className="text-xs font-bold uppercase tracking-[0.16em] text-white/45">โจทย์ภาษาไทย</span><span className="text-xs font-semibold text-white/45">{index + 1} / {pool.length}</span></div><p className="mt-5 text-2xl font-bold leading-10 sm:text-3xl">{current.definition}</p><div className="mt-5 flex gap-2"><VoiceButton text={current.definition} lang="th-TH" label="ฟังโจทย์ภาษาไทย" /><VoiceButton text={current.term} lang="en-US" label="ฟังคำตอบภาษาอังกฤษ" /></div></div><div className="p-7 sm:p-10"><div className={`min-h-20 rounded-2xl border-2 border-dashed px-5 py-5 text-center font-display text-3xl font-bold tracking-[0.08em] ${feedback === "correct" ? "border-emerald-400 bg-mint text-emerald-700" : feedback === "wrong" ? "border-coral bg-coral/10 text-coral" : "border-ink/15 text-ink"}`}>{answer || <span className="text-ink/20">เลือกคำตอบด้านล่าง</span>}</div><div className="mt-7 flex flex-wrap justify-center gap-2">{parts.map((part) => <button key={part.id} disabled={selected.includes(part.id) || Boolean(feedback)} onClick={() => choosePart(part.id)} className={`grid min-h-12 min-w-12 place-items-center rounded-2xl border px-3 text-lg font-bold transition ${selected.includes(part.id) ? "border-ink/10 bg-ink/5 text-ink/25" : "border-ink/10 bg-white text-ink hover:-translate-y-0.5 hover:border-coral hover:text-coral"}`}>{part.text}</button>)}</div><div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">{feedback ? <button onClick={nextQuestion} className="flex items-center justify-center gap-2 rounded-2xl bg-ink px-6 py-3.5 text-sm font-bold text-white">คำถัดไป <ArrowRight size={16} /></button> : <button disabled={selected.length !== parts.length} onClick={checkAnswer} className="rounded-2xl bg-coral px-6 py-3.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-35">ตรวจคำตอบ</button>}{feedback === "wrong" && <button onClick={() => { setSelected([]); setFeedback(null); }} className="rounded-2xl border border-ink/10 px-6 py-3.5 text-sm font-bold text-ink/60">ลองใหม่</button>}</div>{feedback === "wrong" && <p className="mt-5 text-center text-sm font-semibold text-coral">คำตอบที่ถูกคือ <span className="font-bold">{current.term}</span></p>}</div></section></div>;
+  return <div className="mx-auto max-w-3xl py-10 lg:py-14"><PageTitle eyebrow="fill mode · thai prompt" title="เติมคำจากคำแปลภาษาไทย" description="อ่านโจทย์ภาษาไทย แล้วเลือกตัวอักษรที่สลับลำดับให้เป็นคำศัพท์ภาษาอังกฤษ" /><section className="mt-6 overflow-hidden rounded-[32px] border border-ink/10 bg-white shadow-soft"><div className="bg-ink px-7 py-5 text-white sm:px-10"><div className="flex items-center justify-between"><span className="text-xs font-bold uppercase tracking-[0.16em] text-white/45">โจทย์ภาษาไทย</span><span className="text-xs font-semibold text-white/45">{index + 1} / {pool.length}</span></div><p className="mt-5 text-2xl font-bold leading-10 sm:text-3xl">{current.definition}</p><div className="mt-5 flex gap-2"><VoiceButton text={current.definition} lang="th-TH" label="ฟังโจทย์ภาษาไทย" /><VoiceButton text={current.term} lang="en-US" label="ฟังคำตอบภาษาอังกฤษ" /></div></div><div className="p-7 sm:p-10"><div className={`min-h-20 rounded-2xl border-2 border-dashed px-5 py-5 text-center font-display text-3xl font-bold tracking-[0.08em] ${feedback === "correct" ? "border-emerald-400 bg-mint text-emerald-700" : feedback === "wrong" ? "border-coral bg-coral/10 text-coral" : "border-ink/15 text-ink"}`}>{answer || <span className="text-ink/20">เลือกตัวอักษรด้านล่าง</span>}</div><div className="mt-7 flex flex-wrap justify-center gap-2">{parts.map((part) => <button key={part.id} disabled={selected.includes(part.id) || Boolean(feedback)} onClick={() => choosePart(part.id)} className={`grid min-h-12 min-w-12 place-items-center rounded-2xl border px-3 text-lg font-bold transition ${selected.includes(part.id) ? "border-ink/10 bg-ink/5 text-ink/25" : "border-ink/10 bg-white text-ink hover:-translate-y-0.5 hover:border-coral hover:text-coral"}`}>{part.text}</button>)}</div><div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">{feedback ? <button onClick={nextQuestion} className="flex items-center justify-center gap-2 rounded-2xl bg-ink px-6 py-3.5 text-sm font-bold text-white">คำถัดไป <ArrowRight size={16} /></button> : <button disabled={selected.length !== parts.length} onClick={checkAnswer} className="rounded-2xl bg-coral px-6 py-3.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-35">ตรวจคำตอบ</button>}{feedback === "wrong" && <button onClick={() => { setSelected([]); setFeedback(null); }} className="rounded-2xl border border-ink/10 px-6 py-3.5 text-sm font-bold text-ink/60">ลองใหม่</button>}</div>{feedback === "wrong" && <p className="mt-5 text-center text-sm font-semibold text-coral">คำตอบที่ถูกคือ <span className="font-bold">{current.term}</span></p>}</div></section></div>;
 }
 
 function CategoryPicker({ categories, value, onChange, onCreated }: { categories: Category[]; value: string; onChange: (value: string) => void; onCreated: (category: Category) => void }) {
