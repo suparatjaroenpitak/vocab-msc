@@ -56,23 +56,30 @@ function getGreeting() {
 
 const WORD_CACHE_PREFIX = "lexiflow:words:";
 
+function selectDueWords(words: Word[]) {
+  const now = Date.now();
+  return words
+    .filter((word) => new Date(word.due_at).getTime() <= now)
+    .sort((left, right) => left.due_at.localeCompare(right.due_at) || right.id - left.id);
+}
+
 function readWordCache(identity: string) {
   try {
     const raw = window.localStorage.getItem(`${WORD_CACHE_PREFIX}${encodeURIComponent(identity)}`);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { words?: Word[]; dueWords?: Word[] };
-    if (!Array.isArray(parsed.words) || !Array.isArray(parsed.dueWords)) return null;
-    return { words: parsed.words, dueWords: parsed.dueWords };
+    const parsed = JSON.parse(raw) as { words?: Word[] };
+    if (!Array.isArray(parsed.words)) return null;
+    return { words: parsed.words };
   } catch {
     return null;
   }
 }
 
-function saveWordCache(identity: string, words: Word[], dueWords: Word[]) {
+function saveWordCache(identity: string, words: Word[]) {
   try {
-    window.localStorage.setItem(`${WORD_CACHE_PREFIX}${encodeURIComponent(identity)}`, JSON.stringify({ words, dueWords }));
+    window.localStorage.setItem(`${WORD_CACHE_PREFIX}${encodeURIComponent(identity)}`, JSON.stringify({ words }));
   } catch {
-    // localStorage can be unavailable in private browsing; SQLite remains the source of truth.
+    // localStorage can be unavailable in private browsing; PostgreSQL remains the source of truth.
   }
 }
 
@@ -112,26 +119,28 @@ export default function HomePage() {
   const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
   const learnerKey = session?.user?.email?.trim().toLowerCase() || null;
 
-  const loadWords = useCallback(async (identity: string, categoryId: number | null = null) => {
-    const cacheIdentity = `${identity}:category:${categoryId ?? "all"}`;
-    const cached = readWordCache(cacheIdentity);
+  const loadWords = useCallback(async (identity: string) => {
+    const cached = readWordCache(identity);
     if (cached) {
       setWords(cached.words);
-      setDueWords(cached.dueWords);
+      setDueWords(selectDueWords(cached.words));
       setLoading(false);
     } else {
       setLoading(true);
     }
     try {
-      const categoryQuery = categoryId ? `&categoryId=${categoryId}` : "";
-      const response = await fetch(`/api/words?includeDue=1${categoryQuery}`, { signal: AbortSignal.timeout(30_000) });
+      const response = await fetch("/api/words?includeDue=1", { signal: AbortSignal.timeout(30_000) });
       if (!response.ok) throw new Error("โหลดคลังคำศัพท์ไม่สำเร็จ");
-      const payload = (await response.json()) as { words: Word[]; dueWords: Word[] };
+      const payload = (await response.json()) as { words: Word[]; dueWordIds: number[] };
       const nextWords = payload.words;
-      const nextDueWords = payload.dueWords;
+      const wordsById = new Map(nextWords.map((word) => [word.id, word]));
+      const nextDueWords = payload.dueWordIds.flatMap((id) => {
+        const word = wordsById.get(id);
+        return word ? [word] : [];
+      });
       setWords(nextWords);
       setDueWords(nextDueWords);
-      saveWordCache(cacheIdentity, nextWords, nextDueWords);
+      saveWordCache(identity, nextWords);
     } catch {
       if (!cached) {
         setWords([]);
@@ -144,8 +153,8 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!learnerKey) return;
-    void loadWords(learnerKey, learningCategoryId);
-  }, [loadWords, learnerKey, learningCategoryId]);
+    void loadWords(learnerKey);
+  }, [loadWords, learnerKey]);
   useEffect(() => {
     if (!learnerKey) return;
     void fetch("/api/categories", { signal: AbortSignal.timeout(30_000) }).then((response) => response.json()).then((data) => setCategories(data as Category[]));
@@ -173,6 +182,7 @@ export default function HomePage() {
   const reviewedToday = useMemo(() => words.filter((word) => word.last_reviewed?.slice(0, 10) === new Date().toISOString().slice(0, 10)).length, [words]);
   const mastered = useMemo(() => words.filter((word) => word.interval_days >= 7).length, [words]);
   const learningWords = useMemo(() => learningCategoryId ? words.filter((word) => word.category_id === learningCategoryId) : words, [learningCategoryId, words]);
+  const scopedDueWords = useMemo(() => learningCategoryId ? dueWords.filter((word) => word.category_id === learningCategoryId) : dueWords, [dueWords, learningCategoryId]);
 
   function navigate(tab: Tab) {
     setActiveTab(tab);
@@ -180,9 +190,24 @@ export default function HomePage() {
   }
 
   async function reviewWord(id: number, rating: ReviewRating) {
-    await fetch(`/api/words/${id}/review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rating }) });
+    const updated = await requestJson<{ dueAt: string; intervalDays: number; reviewCount: number; correctCount: number; lastReviewed: string }>(`/api/words/${id}/review`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rating })
+    });
+    const nextWords = words.map((word) => word.id === id ? {
+      ...word,
+      due_at: updated.dueAt,
+      interval_days: updated.intervalDays,
+      review_count: updated.reviewCount,
+      correct_count: updated.correctCount,
+      last_reviewed: updated.lastReviewed
+    } : word);
+    const nextDueWords = selectDueWords(nextWords);
+    setWords(nextWords);
+    setDueWords(nextDueWords);
+    if (learnerKey) saveWordCache(learnerKey, nextWords);
     setToast(rating === "known" ? "เก็บคำนี้เข้าความจำระยะยาวแล้ว" : "บันทึกไว้ทบทวนอีกครั้งใน 10 นาที");
-    if (learnerKey) await loadWords(learnerKey, learningCategoryId);
   }
 
   async function saveQuizAttempt(score: number, totalQuestions: number) {
@@ -247,11 +272,11 @@ export default function HomePage() {
           <div className="mx-auto max-w-[1100px]">
             {(activeTab === "review" || activeTab === "quiz" || activeTab === "fill") && <LearningScope categories={categories} value={learningCategoryId} onChange={setLearningCategoryId} />}
             {activeTab === "dashboard" && <Dashboard words={words} dueWords={dueWords} mastered={mastered} reviewedToday={reviewedToday} loading={loading} onNavigate={navigate} />}
-            {activeTab === "review" && <ReviewView words={dueWords} loading={loading} onReview={reviewWord} onNavigate={navigate} />}
+            {activeTab === "review" && <ReviewView words={scopedDueWords} loading={loading} onReview={reviewWord} onNavigate={navigate} />}
             {activeTab === "quiz" && <QuizView words={learningWords} onComplete={saveQuizAttempt} />}
             {activeTab === "leaderboard" && <LeaderboardView data={leaderboard} loading={leaderboardLoading} error={leaderboardError} onRetry={() => void loadLeaderboard()} />}
             {activeTab === "fill" && <FillView words={learningWords} onToast={setToast} />}
-            {activeTab === "import" && <ImportView categories={categories} onCategoryCreated={(category) => setCategories((current) => [...current, category])} onDone={async (message) => { setToast(message); if (learnerKey) await loadWords(learnerKey, learningCategoryId); const response = await fetch("/api/categories"); setCategories((await response.json()) as Category[]); navigate("dashboard"); }} />}
+            {activeTab === "import" && <ImportView categories={categories} onCategoryCreated={(category) => setCategories((current) => [...current, category])} onDone={async (message) => { setToast(message); const [, categoryResponse] = await Promise.all([learnerKey ? loadWords(learnerKey) : Promise.resolve(), fetch("/api/categories")]); setCategories((await categoryResponse.json()) as Category[]); navigate("dashboard"); }} />}
           </div>
         </section>
       </div>
@@ -290,7 +315,7 @@ function ReviewView({ words, loading, onReview, onNavigate }: { words: Word[]; l
   const [revealed, setRevealed] = useState(false);
   const current = words[index];
   useEffect(() => { setIndex(0); setRevealed(false); }, [words.length]);
-  async function finish(rating: ReviewRating) { if (!current) return; await onReview(current.id, rating); setRevealed(false); setIndex((value) => value + 1); }
+  async function finish(rating: ReviewRating) { if (!current) return; await onReview(current.id, rating); setRevealed(false); }
   if (loading) return <PageTitle eyebrow="review mode" title="กำลังเตรียมคำศัพท์…" />;
   if (!current) return <div className="py-20 text-center"><div className="mx-auto grid h-20 w-20 place-items-center rounded-[28px] bg-mint text-ink"><Trophy size={32} /></div><h1 className="mt-7 font-display text-3xl font-bold">เคลียร์หมดแล้ว!</h1><p className="mx-auto mt-3 max-w-sm text-sm leading-7 text-ink/50">ไม่มีคำที่ถึงเวลาทบทวนในตอนนี้ กลับมาใหม่อีกครั้งเมื่อถึงจังหวะ</p><button onClick={() => onNavigate("quiz")} className="mt-7 rounded-2xl bg-ink px-5 py-3 text-sm font-bold text-white">ไปฝึกควิซแทน</button></div>;
   return <div className="mx-auto max-w-2xl py-10 lg:py-14"><PageTitle eyebrow={`review mode · ${Math.min(index + 1, words.length)} / ${words.length}`} title="ทบทวนให้จำได้" description="ลองนึกคำแปลก่อนเปิดการ์ด แล้วเลือกตามความรู้สึกจริงของคุณ" /><div className="mt-10 overflow-hidden rounded-[32px] border border-ink/10 bg-white shadow-soft"><div className="h-2 bg-ink/5"><div className="h-full bg-coral transition-all duration-500" style={{ width: `${((index + 1) / words.length) * 100}%` }} /></div><div className="px-7 py-12 text-center sm:px-14 sm:py-16"><span className="rounded-full bg-lilac px-3 py-1.5 text-xs font-bold text-ink">{current.part_of_speech || "word"}</span><h2 className="mt-7 break-words font-display text-5xl font-bold tracking-[-0.05em] sm:text-6xl">{current.term}</h2><div className="mt-5 flex justify-center gap-2"><VoiceButton text={current.term} lang="en-US" label="ฟังคำศัพท์ภาษาอังกฤษ" /><VoiceButton text={current.definition} lang="th-TH" label="ฟังคำแปลภาษาไทย" /></div><p className="mt-4 text-xs text-ink/35">ทบทวนครั้งล่าสุด: {formatDate(current.last_reviewed)}</p>{revealed ? <div className="mt-11 rounded-2xl bg-cream px-5 py-5 text-left"><p className="text-xs font-bold uppercase tracking-[0.16em] text-ink/35">คำแปล</p><p className="mt-2 text-lg font-semibold leading-8">{current.definition}</p></div> : <button onClick={() => setRevealed(true)} className="mt-12 rounded-2xl border border-ink/15 px-6 py-3 text-sm font-bold transition hover:border-coral hover:text-coral">เปิดคำแปล <span className="ml-2 text-ink/35">space</span></button>}</div>{revealed && <div className="grid grid-cols-2 gap-3 border-t border-ink/8 bg-cream/60 p-5"><button onClick={() => void finish("again")} className="flex items-center justify-center gap-2 rounded-2xl border border-coral/20 bg-white py-3.5 text-sm font-bold text-coral transition hover:bg-coral hover:text-white"><RotateCcw size={16} /> ยังไม่แม่น</button><button onClick={() => void finish("known")} className="flex items-center justify-center gap-2 rounded-2xl bg-ink py-3.5 text-sm font-bold text-white transition hover:bg-coral"><Check size={16} /> จำได้แล้ว</button></div>}</div></div>;

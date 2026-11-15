@@ -4,6 +4,8 @@ import type { getDb } from "@/lib/db";
 
 type Db = ReturnType<typeof getDb>;
 
+const seededUsers = new Map<string, Promise<void>>();
+
 export const DEFAULT_VOCABULARY_SEED_KEY = "toeic-business-500-v1";
 export const DEFAULT_VOCABULARY_CATEGORY = "TOEIC";
 
@@ -521,7 +523,10 @@ if (DEFAULT_VOCABULARY.length !== 500 || DEFAULT_VOCABULARY.some((word, index) =
 }
 
 export async function ensureDefaultVocabulary(db: Db, userEmail: string) {
-  await db.transaction(async (tx) => {
+  const existingSeed = seededUsers.get(userEmail);
+  if (existingSeed) return existingSeed;
+
+  const seedOperation = db.transaction(async (tx) => {
     const [seedState] = await tx.select({ id: userSeedStates.id }).from(userSeedStates).where(and(
       eq(userSeedStates.user_email, userEmail),
       eq(userSeedStates.seed_key, DEFAULT_VOCABULARY_SEED_KEY)
@@ -562,4 +567,16 @@ export async function ensureDefaultVocabulary(db: Db, userEmail: string) {
       applied_at: now
     }).onConflictDoNothing({ target: [userSeedStates.user_email, userSeedStates.seed_key] });
   });
+
+  seededUsers.set(userEmail, seedOperation);
+  if (seededUsers.size > 500) {
+    const oldestEmail = seededUsers.keys().next().value;
+    if (oldestEmail && oldestEmail !== userEmail) seededUsers.delete(oldestEmail);
+  }
+  try {
+    await seedOperation;
+  } catch (error) {
+    if (seededUsers.get(userEmail) === seedOperation) seededUsers.delete(userEmail);
+    throw error;
+  }
 }

@@ -38,8 +38,14 @@ export async function GET(request: Request) {
     }).from(wordTable).leftJoin(categoryTable, eq(categoryTable.id, wordTable.category_id)).where(condition).orderBy(...orderBy);
   };
   if (includeDue) {
-    const [words, dueWords] = await Promise.all([queryWords(false), queryWords(true)]);
-    return NextResponse.json({ words, dueWords });
+    const words = await queryWords(false);
+    const now = Date.now();
+    const dueWordIds = words
+      .filter((word) => new Date(word.due_at).getTime() <= now)
+      .filter((word) => !Number.isInteger(requestedCategoryId) || requestedCategoryId <= 0 || word.category_id === requestedCategoryId)
+      .sort((left, right) => left.due_at.localeCompare(right.due_at) || right.id - left.id)
+      .map((word) => word.id);
+    return NextResponse.json({ words, dueWordIds });
   }
   return NextResponse.json(await queryWords(mode === "due"));
 }
