@@ -5,7 +5,7 @@ import type { getDb } from "@/lib/db";
 type Db = ReturnType<typeof getDb>;
 
 export const DEFAULT_VOCABULARY_SEED_KEY = "toeic-business-500-v1";
-export const DEFAULT_VOCABULARY_CATEGORY = "TOEIC 500";
+export const DEFAULT_VOCABULARY_CATEGORY = "TOEIC";
 
 // Each row is: source number, term, part of speech, Thai definition.
 const vocabularyRows = `
