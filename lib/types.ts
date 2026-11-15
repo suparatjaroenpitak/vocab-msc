@@ -27,3 +27,19 @@ export type ParsedWord = {
   partOfSpeech: string;
   definition: string;
 };
+
+export type LeaderboardPlayer = {
+  rank: number;
+  name: string;
+  isMe: boolean;
+  bestPercent: number;
+  averagePercent: number;
+  attempts: number;
+  correctAnswers: number;
+  questionsAnswered: number;
+};
+
+export type LeaderboardSnapshot = {
+  me: LeaderboardPlayer | null;
+  leaders: LeaderboardPlayer[];
+};

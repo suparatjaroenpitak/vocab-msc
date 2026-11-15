@@ -31,9 +31,9 @@ import {
 } from "lucide-react";
 import { requestJson } from "@/lib/request-json";
 import { parseVocabulary } from "@/lib/parser";
-import type { Category, ReviewRating, Word } from "@/lib/types";
+import type { Category, LeaderboardSnapshot, ReviewRating, Word } from "@/lib/types";
 
-type Tab = "dashboard" | "review" | "quiz" | "fill" | "import";
+type Tab = "dashboard" | "review" | "quiz" | "fill" | "import" | "leaderboard";
 
 const sampleImport = `1. airborne (adj.) - ทางอากาศ, ทหารพลร่ม
 2. landing (n.) - การลงจอด, การยกพลขึ้นบก
@@ -107,6 +107,9 @@ export default function HomePage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [learningCategoryId, setLearningCategoryId] = useState<number | null>(null);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardSnapshot | null>(null);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
   const learnerKey = session?.user?.email?.trim().toLowerCase() || null;
 
   const loadWords = useCallback(async (identity: string, categoryId: number | null = null) => {
@@ -147,6 +150,20 @@ export default function HomePage() {
     if (!learnerKey) return;
     void fetch("/api/categories", { signal: AbortSignal.timeout(30_000) }).then((response) => response.json()).then((data) => setCategories(data as Category[]));
   }, [learnerKey]);
+  const loadLeaderboard = useCallback(async () => {
+    setLeaderboardLoading(true);
+    setLeaderboardError(null);
+    try {
+      setLeaderboard(await requestJson<LeaderboardSnapshot>("/api/leaderboard"));
+    } catch (error) {
+      setLeaderboardError(error instanceof Error ? error.message : "โหลดอันดับไม่สำเร็จ");
+    } finally {
+      setLeaderboardLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    if (learnerKey && activeTab === "leaderboard") void loadLeaderboard();
+  }, [activeTab, learnerKey, loadLeaderboard]);
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(null), 3200);
@@ -166,6 +183,16 @@ export default function HomePage() {
     await fetch(`/api/words/${id}/review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rating }) });
     setToast(rating === "known" ? "เก็บคำนี้เข้าความจำระยะยาวแล้ว" : "บันทึกไว้ทบทวนอีกครั้งใน 10 นาที");
     if (learnerKey) await loadWords(learnerKey, learningCategoryId);
+  }
+
+  async function saveQuizAttempt(score: number, totalQuestions: number) {
+    const result = await requestJson<LeaderboardSnapshot>("/api/leaderboard", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ score, totalQuestions })
+    });
+    setLeaderboard(result);
+    return result;
   }
 
   if (status === "loading") return <AuthGate loading />;
@@ -188,6 +215,7 @@ export default function HomePage() {
             <NavItem active={activeTab === "dashboard"} icon={<LayoutDashboard size={18} />} label="ภาพรวม" onClick={() => navigate("dashboard")} />
             <NavItem active={activeTab === "review"} icon={<RotateCcw size={18} />} label="ทบทวนวันนี้" badge={dueWords.length} onClick={() => navigate("review")} />
             <NavItem active={activeTab === "quiz"} icon={<CircleHelp size={18} />} label="ควิซคำศัพท์" onClick={() => navigate("quiz")} />
+            <NavItem active={activeTab === "leaderboard"} icon={<Trophy size={18} />} label="สถิติและอันดับ" onClick={() => navigate("leaderboard")} />
             <NavItem active={activeTab === "fill"} icon={<GraduationCap size={18} />} label="เติมคำจากคำแปล" onClick={() => navigate("fill")} />
             <NavItem active={activeTab === "import"} icon={<FileUp size={18} />} label="นำเข้าคำศัพท์" onClick={() => navigate("import")} />
           </nav>
@@ -208,7 +236,7 @@ export default function HomePage() {
         <section className="min-w-0 flex-1 px-5 py-5 sm:px-8 lg:px-12 lg:py-8">
           <header className="flex items-center justify-between gap-4">
             <button className="rounded-xl border border-ink/10 bg-white/70 p-2.5 lg:hidden" onClick={() => setSidebarOpen(true)} aria-label="เปิดเมนู"><Menu size={19} /></button>
-            <div className="hidden items-center gap-2 text-sm text-ink/40 sm:flex"><span className="h-2 w-2 rounded-full bg-emerald-400" /> ระบบพร้อมใช้งาน <span className="text-ink/20">/</span> {activeTab === "dashboard" ? "ภาพรวม" : activeTab === "review" ? "ทบทวน" : activeTab === "quiz" ? "ควิซ" : activeTab === "fill" ? "เติมคำ" : "นำเข้า"}</div>
+            <div className="hidden items-center gap-2 text-sm text-ink/40 sm:flex"><span className="h-2 w-2 rounded-full bg-emerald-400" /> ระบบพร้อมใช้งาน <span className="text-ink/20">/</span> {activeTab === "dashboard" ? "ภาพรวม" : activeTab === "review" ? "ทบทวน" : activeTab === "quiz" ? "ควิซ" : activeTab === "fill" ? "เติมคำ" : activeTab === "leaderboard" ? "สถิติและอันดับ" : "นำเข้า"}</div>
             <div className="ml-auto flex items-center gap-3">
               <div className="hidden text-right sm:block"><p className="text-xs font-semibold text-ink/40">{session?.user?.email ? "บัญชีของคุณ" : "โหมดทดลอง"}</p><p className="text-sm font-bold">{session?.user?.name || "Guest learner"}</p></div>
               <div className="grid h-10 w-10 place-items-center rounded-2xl bg-coral/15 font-bold text-coral">{session?.user?.name?.slice(0, 1).toUpperCase() || "G"}</div>
@@ -220,7 +248,8 @@ export default function HomePage() {
             {(activeTab === "review" || activeTab === "quiz" || activeTab === "fill") && <LearningScope categories={categories} value={learningCategoryId} onChange={setLearningCategoryId} />}
             {activeTab === "dashboard" && <Dashboard words={words} dueWords={dueWords} mastered={mastered} reviewedToday={reviewedToday} loading={loading} onNavigate={navigate} />}
             {activeTab === "review" && <ReviewView words={dueWords} loading={loading} onReview={reviewWord} onNavigate={navigate} />}
-            {activeTab === "quiz" && <QuizView words={learningWords} onToast={setToast} />}
+            {activeTab === "quiz" && <QuizView words={learningWords} onComplete={saveQuizAttempt} />}
+            {activeTab === "leaderboard" && <LeaderboardView data={leaderboard} loading={leaderboardLoading} error={leaderboardError} onRetry={() => void loadLeaderboard()} />}
             {activeTab === "fill" && <FillView words={learningWords} onToast={setToast} />}
             {activeTab === "import" && <ImportView categories={categories} onCategoryCreated={(category) => setCategories((current) => [...current, category])} onDone={async (message) => { setToast(message); if (learnerKey) await loadWords(learnerKey, learningCategoryId); const response = await fetch("/api/categories"); setCategories((await response.json()) as Category[]); navigate("dashboard"); }} />}
           </div>
@@ -269,19 +298,68 @@ function ReviewView({ words, loading, onReview, onNavigate }: { words: Word[]; l
 
 function PageTitle({ eyebrow, title, description }: { eyebrow: string; title: string; description?: string }) { return <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-coral">{eyebrow}</p><h1 className="mt-3 font-display text-4xl font-bold tracking-[-0.04em] sm:text-5xl">{title}</h1>{description && <p className="mt-4 max-w-lg text-sm leading-7 text-ink/50">{description}</p>}</div>; }
 
-function QuizView({ words, onToast }: { words: Word[]; onToast: (message: string) => void }) {
+function QuizView({ words, onComplete }: { words: Word[]; onComplete: (score: number, totalQuestions: number) => Promise<LeaderboardSnapshot> }) {
   const [questionIndex, setQuestionIndex] = useState(0);
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState<{ score: number; total: number; rank: number | null; bestPercent: number | null; saved: boolean } | null>(null);
   const quizWords = useMemo(() => [...words].sort(() => Math.random() - 0.5).slice(0, Math.min(10, words.length)), [words]);
   const current = quizWords[questionIndex];
   const options = useMemo(() => { if (!current) return []; return [current, ...words.filter((word) => word.id !== current.id).sort(() => Math.random() - 0.5).slice(0, 3)].sort(() => Math.random() - 0.5); }, [current, words]);
-  function answer(term: string) { if (selected) return; setSelected(term); const correct = term === current.term; if (correct) setScore((value) => value + 1); window.setTimeout(() => { if (questionIndex + 1 >= quizWords.length) { onToast(`จบควิซแล้ว ได้ ${score + (correct ? 1 : 0)} / ${quizWords.length} คะแนน`); setStarted(false); setQuestionIndex(0); setSelected(null); setScore(0); } else { setQuestionIndex((value) => value + 1); setSelected(null); } }, 650); }
+  function startQuiz() {
+    setResult(null);
+    setQuestionIndex(0);
+    setScore(0);
+    setSelected(null);
+    setStarted(true);
+  }
+  function answer(term: string) {
+    if (selected || !current) return;
+    setSelected(term);
+    const correct = term === current.term;
+    if (correct) setScore((value) => value + 1);
+    window.setTimeout(() => {
+      if (questionIndex + 1 >= quizWords.length) {
+        const finalScore = score + (correct ? 1 : 0);
+        setStarted(false);
+        setQuestionIndex(0);
+        setSelected(null);
+        setScore(0);
+        setResult({ score: finalScore, total: quizWords.length, rank: null, bestPercent: null, saved: false });
+        setSaving(true);
+        void onComplete(finalScore, quizWords.length).then((snapshot) => {
+          setResult({ score: finalScore, total: quizWords.length, rank: snapshot.me?.rank ?? null, bestPercent: snapshot.me?.bestPercent ?? null, saved: true });
+        }).catch(() => {
+          setResult({ score: finalScore, total: quizWords.length, rank: null, bestPercent: null, saved: false });
+        }).finally(() => setSaving(false));
+      } else {
+        setQuestionIndex((value) => value + 1);
+        setSelected(null);
+      }
+    }, 650);
+  }
   if (!words.length) return <div className="py-20 text-center"><PageTitle eyebrow="quiz mode" title="เพิ่มคำศัพท์ก่อนเริ่มควิซ" description="นำเข้าคำศัพท์อย่างน้อย 4 คำ เพื่อให้ระบบสร้างตัวเลือกที่เหมาะสม" /></div>;
-  if (!started) return <div className="py-10 lg:py-14"><PageTitle eyebrow="quiz mode" title="พร้อมทดสอบความจำหรือยัง?" description="ควิซแบบเลือกคำแปลที่ถูกต้อง จำนวนสูงสุด 10 ข้อ ใช้คำศัพท์จากคลังของคุณ" /><div className="mt-10 grid gap-5 sm:grid-cols-3"><div className="rounded-[28px] bg-ink p-6 text-white sm:col-span-2"><div className="flex h-full flex-col justify-between"><div><span className="grid h-12 w-12 place-items-center rounded-2xl bg-coral"><GraduationCap size={23} /></span><h2 className="mt-10 font-display text-3xl font-bold">Quick recall</h2><p className="mt-2 max-w-xs text-sm leading-6 text-white/50">ทดสอบคำแปลแบบเร็ว ๆ เพื่อดูว่าคำไหนยังต้องกลับไปทบทวน</p></div><button onClick={() => setStarted(true)} className="mt-12 flex w-fit items-center gap-3 rounded-2xl bg-white px-5 py-3 text-sm font-bold text-ink transition hover:bg-coral hover:text-white">เริ่มควิซ <ArrowRight size={16} /></button></div></div><div className="rounded-[28px] border border-ink/10 bg-white p-6 shadow-card"><p className="text-xs font-bold uppercase tracking-[0.15em] text-ink/35">best score</p><p className="mt-4 font-display text-5xl font-bold">—</p><p className="mt-3 text-sm text-ink/45">ยังไม่มีสถิติในเซสชันนี้</p></div></div></div>;
+  if (result) return <div className="mx-auto max-w-2xl py-10 lg:py-14"><PageTitle eyebrow="quiz result" title="บันทึกผลควิซแล้ว" description="คะแนนถูกเก็บในบัญชีของคุณ และนำไปคำนวณอันดับรวม" /><section className="mt-8 rounded-[32px] border border-ink/10 bg-white p-7 text-center shadow-soft sm:p-12"><div className="mx-auto grid h-16 w-16 place-items-center rounded-3xl bg-mint text-ink"><Trophy size={28} /></div><p className="mt-6 text-sm font-bold text-ink/45">คะแนนรอบนี้</p><p className="mt-1 font-display text-6xl font-bold">{result.score}<span className="text-3xl text-ink/35"> / {result.total}</span></p>{saving ? <p className="mt-6 text-sm text-ink/45">กำลังบันทึกคะแนนและคำนวณอันดับ…</p> : result.saved ? <div className="mt-6 grid gap-3 rounded-2xl bg-cream p-5 text-sm sm:grid-cols-2"><p>อันดับของคุณ <strong className="ml-1 text-coral">{result.rank ? `#${result.rank}` : "—"}</strong></p><p>คะแนนสูงสุด <strong className="ml-1 text-coral">{result.bestPercent ?? 0}%</strong></p></div> : <p className="mt-6 rounded-2xl bg-coral/10 p-4 text-sm text-coral">บันทึกคะแนนไม่สำเร็จ กรุณาตรวจสอบว่ามีตาราง quiz_attempts ใน PostgreSQL แล้ว</p>}<button onClick={startQuiz} className="mt-7 rounded-2xl bg-ink px-6 py-3.5 text-sm font-bold text-white transition hover:bg-coral">เล่นอีกครั้ง</button></section></div>;
+  if (!started) return <div className="py-10 lg:py-14"><PageTitle eyebrow="quiz mode" title="พร้อมทดสอบความจำหรือยัง?" description="ควิซแบบเลือกคำแปล สูงสุด 10 ข้อ บันทึกคะแนนและสถิติให้อัตโนมัติทุกครั้ง" /><div className="mt-10 grid gap-5 sm:grid-cols-3"><div className="rounded-[28px] bg-ink p-6 text-white sm:col-span-2"><div className="flex h-full flex-col justify-between"><div><span className="grid h-12 w-12 place-items-center rounded-2xl bg-coral"><GraduationCap size={23} /></span><h2 className="mt-10 font-display text-3xl font-bold">Quick recall</h2><p className="mt-2 max-w-xs text-sm leading-6 text-white/50">ทดสอบคำแปลแบบเร็ว แล้วนำผลไปเทียบอันดับกับผู้เรียนคนอื่น</p></div><button onClick={startQuiz} className="mt-12 flex w-fit items-center gap-3 rounded-2xl bg-white px-5 py-3 text-sm font-bold text-ink transition hover:bg-coral hover:text-white">เริ่มควิซ <ArrowRight size={16} /></button></div></div><div className="rounded-[28px] border border-ink/10 bg-white p-6 shadow-card"><p className="text-xs font-bold uppercase tracking-[0.15em] text-ink/35">สถิติส่วนตัว</p><p className="mt-4 font-display text-3xl font-bold">ดูผลสะสม</p><p className="mt-3 text-sm text-ink/45">เปิดหน้า “สถิติและอันดับ” เพื่อดูคะแนนสูงสุดและอันดับของคุณ</p></div></div></div>;
   if (!current) return null;
   return <div className="mx-auto max-w-2xl py-10 lg:py-14"><div className="flex items-center justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-coral">question {questionIndex + 1} / {quizWords.length}</p><h1 className="mt-3 font-display text-3xl font-bold">เลือกคำแปลที่ตรงที่สุด</h1></div><div className="rounded-2xl bg-white px-4 py-3 text-center shadow-card"><p className="text-[10px] font-bold uppercase tracking-widest text-ink/35">score</p><p className="font-display text-xl font-bold">{score}</p></div></div><div className="mt-8 rounded-[32px] border border-ink/10 bg-white p-7 text-center shadow-soft sm:p-12"><div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-lilac text-ink"><CircleHelp size={23} /></div><p className="mt-7 text-sm font-bold text-ink/35">คำศัพท์นี้แปลว่าอะไร?</p><h2 className="mt-3 font-display text-5xl font-bold tracking-[-0.05em]">{current.term}</h2><div className="mt-5 flex justify-center"><VoiceButton text={current.term} lang="en-US" label="ฟังคำศัพท์ภาษาอังกฤษ" /></div><div className="mt-10 grid gap-3 text-left">{options.map((option) => <button key={option.id} onClick={() => answer(option.term)} className={`flex items-center justify-between rounded-2xl border px-4 py-4 text-sm font-semibold transition ${selected ? option.term === current.term ? "border-emerald-400 bg-mint" : option.term === selected ? "border-coral bg-coral/10" : "border-ink/8 opacity-50" : "border-ink/10 hover:border-coral hover:bg-coral/5"}`}><span>{option.definition}</span>{selected && option.term === current.term && <Check size={17} className="text-emerald-600" />}</button>)}</div></div></div>;
+}
+
+function LeaderboardView({ data, loading, error, onRetry }: { data: LeaderboardSnapshot | null; loading: boolean; error: string | null; onRetry: () => void }) {
+  const me = data?.me;
+  return <div className="py-10 lg:py-14"><PageTitle eyebrow="quiz statistics" title="สถิติและอันดับ" description="อันดับจัดตามคะแนนสูงสุดเป็นเปอร์เซ็นต์ เพื่อให้เทียบกันได้แม้จำนวนข้อในแต่ละรอบต่างกัน" />
+    <p className="mt-4 text-xs leading-5 text-ink/45">ชื่อบัญชี Google และสถิติควิซจะแสดงให้ผู้ใช้ที่เข้าสู่ระบบเห็น โดยไม่แสดงอีเมล</p>
+    {error && <div role="alert" className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-coral/25 bg-coral/10 p-4 text-sm"><span>{error}</span><button onClick={onRetry} className="font-bold text-coral">ลองโหลดอีกครั้ง</button></div>}
+    <div className="mt-7 grid grid-cols-2 gap-3 xl:grid-cols-4"><StatCard icon={<Trophy size={18} />} label="อันดับของคุณ" value={loading ? "—" : me ? `#${me.rank}` : "—"} tone="coral" /><StatCard icon={<Target size={18} />} label="คะแนนสูงสุด" value={loading ? "—" : me ? `${me.bestPercent}%` : "—"} tone="mint" /><StatCard icon={<GraduationCap size={18} />} label="คะแนนเฉลี่ย" value={loading ? "—" : me ? `${me.averagePercent}%` : "—"} tone="lilac" /><StatCard icon={<RotateCcw size={18} />} label="จำนวนรอบควิซ" value={loading ? "—" : me?.attempts ?? 0} tone="sand" /></div>
+    <section className="mt-7 overflow-hidden rounded-[28px] border border-ink/10 bg-white shadow-card"><div className="flex items-center justify-between border-b border-ink/8 px-5 py-5 sm:px-7"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-coral">leaderboard</p><h2 className="mt-1 font-display text-2xl font-bold">อันดับคะแนนสูงสุด</h2></div><span className="rounded-full bg-ink/5 px-3 py-1.5 text-xs font-semibold text-ink/50">Top 20</span></div>
+      {loading && <p className="p-8 text-center text-sm text-ink/45">กำลังโหลดสถิติ…</p>}
+      {!loading && !error && data && data.leaders.length === 0 && <p className="p-8 text-center text-sm text-ink/45">ยังไม่มีคะแนน เริ่มควิซเพื่อเป็นคนแรกในตารางอันดับ</p>}
+      {!loading && data?.leaders.length ? <div className="divide-y divide-ink/8">{data.leaders.map((player, index) => <div key={`${player.rank}-${index}`} className={`grid grid-cols-[3.5rem_minmax(0,1fr)_5rem_5rem] items-center gap-2 px-4 py-4 text-sm sm:grid-cols-[4rem_minmax(0,1fr)_7rem_7rem_7rem] sm:px-7 ${player.isMe ? "bg-coral/5" : ""}`}><span className={`font-display text-xl font-bold ${player.rank <= 3 ? "text-coral" : "text-ink/45"}`}>#{player.rank}</span><div className="min-w-0"><p className="truncate font-bold">{player.name}{player.isMe && <span className="ml-2 rounded-full bg-coral/10 px-2 py-0.5 text-[10px] text-coral">คุณ</span>}</p><p className="mt-1 text-[11px] text-ink/40">เล่น {player.attempts} รอบ · ตอบถูก {player.correctAnswers}/{player.questionsAnswered}</p></div><div className="text-right"><p className="font-bold">{player.bestPercent}%</p><p className="text-[10px] text-ink/40">สูงสุด</p></div><div className="hidden text-right sm:block"><p className="font-semibold">{player.averagePercent}%</p><p className="text-[10px] text-ink/40">เฉลี่ย</p></div><div className="hidden text-right text-xs text-ink/40 sm:block">{player.attempts} รอบ</div></div>)}</div> : null}
+    </section>
+    {!loading && me && me.rank > (data?.leaders.length ?? 0) && <p className="mt-4 text-center text-sm text-ink/50">คุณอยู่อันดับที่ <strong className="text-coral">#{me.rank}</strong> ดูผลในแถบสถิติด้านบน</p>}
+  </div>;
 }
 
 function FillView({ words, onToast }: { words: Word[]; onToast: (message: string) => void }) {

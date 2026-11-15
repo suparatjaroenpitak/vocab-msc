@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { categories, words } from "@/db/schema";
+import { categories, quizAttempts, words } from "@/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { ensureUserCategories, suggestCategoryName } from "@/lib/categories";
 import type { ParsedWord } from "@/lib/types";
@@ -14,7 +14,7 @@ export function getDb() {
   }
   const pool = globalForDb.postgresPool ?? new Pool({ connectionString, max: 5 });
   globalForDb.postgresPool = pool;
-  return drizzle({ client: pool, schema: { words, categories } });
+  return drizzle({ client: pool, schema: { words, categories, quizAttempts } });
 }
 
 export async function importWords(userEmail: string, parsed: ParsedWord[], requestedCategoryId?: number | null) {

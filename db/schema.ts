@@ -29,3 +29,14 @@ export const words = pgTable("words", {
   uniqueIndex("words_user_term_idx").on(table.user_email, table.term),
   index("words_due_idx").on(table.user_email, table.due_at)
 ]);
+
+export const quizAttempts = pgTable("quiz_attempts", {
+  id: serial("id").primaryKey(),
+  user_email: text("user_email").notNull(),
+  user_name: text("user_name").notNull(),
+  score: integer("score").notNull(),
+  total_questions: integer("total_questions").notNull(),
+  created_at: text("created_at").notNull()
+}, (table) => [
+  index("quiz_attempts_user_idx").on(table.user_email, table.created_at)
+]);

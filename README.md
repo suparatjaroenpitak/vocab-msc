@@ -30,6 +30,10 @@ http://localhost:3000/api/auth/callback/google
 
 หลังตั้งค่า connection string แล้ว ให้สร้างตารางครั้งแรกจากเครื่องที่มี environment เดียวกันด้วย `npm run db:push` หรือใช้ migration ใน `db/migrations` ผ่านเครื่องมือ PostgreSQL ของคุณ
 
+ผลควิซจะถูกบันทึกใน `quiz_attempts` พร้อมคะแนน จำนวนข้อ ชื่อบัญชี Google และเวลาเล่น หน้า “สถิติและอันดับ” แสดงคะแนนสูงสุด คะแนนเฉลี่ย จำนวนรอบ และอันดับจากคะแนนสูงสุดเป็นเปอร์เซ็นต์ ชื่อและคะแนนจะแสดงให้ผู้ใช้ที่เข้าสู่ระบบเห็น โดยไม่แสดงอีเมล
+
+เมื่อเพิ่มตารางหรือแก้ schema ให้ apply schema ล่าสุดกับ PostgreSQL ก่อน deploy โค้ด เช่น `npm run db:push` โดยใช้ `DATABASE_URL` ของฐานข้อมูลเป้าหมาย
+
 ## รูปแบบนำเข้า
 
 รองรับรายการแบบมีเลขลำดับหรือไม่มีเลขลำดับ เช่น `airborne (adj.) - ทางอากาศ`, tab-separated และ JSON ที่มีคีย์ `term`, `definition`, `partOfSpeech`/`pos`
