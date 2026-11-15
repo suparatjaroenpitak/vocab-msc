@@ -18,7 +18,15 @@ export async function POST(request: Request) {
     const requestedCategoryId = typeof body.categoryId === "number" && Number.isInteger(body.categoryId) ? body.categoryId : null;
     const imported = await importWords(userEmail, parsed, requestedCategoryId);
     return NextResponse.json({ imported });
-  } catch {
+  } catch (error) {
+    console.error("Vocabulary import failed", error);
+    const detail = String(error);
+    if (detail.includes("DATABASE_URL is missing")) {
+      return NextResponse.json({ error: "ยังไม่ได้ตั้ง DATABASE_URL ใน Vercel กรุณาเพิ่ม PostgreSQL connection string แล้ว redeploy" }, { status: 500 });
+    }
+    if (/category|relation|column/i.test(detail) && /does not exist|not found/i.test(detail)) {
+      return NextResponse.json({ error: "ฐานข้อมูลยังไม่ได้ใช้ migration ล่าสุด กรุณา apply migration หมวดหมู่กับ PostgreSQL แล้ว redeploy" }, { status: 500 });
+    }
     return NextResponse.json({ error: "บันทึกคำศัพท์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }, { status: 500 });
   }
 }

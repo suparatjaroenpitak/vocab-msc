@@ -1,11 +1,20 @@
-import { drizzle } from "drizzle-orm/netlify-db";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
 import { categories, words } from "@/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { ensureUserCategories, getCategoryIdForWord } from "@/lib/categories";
 import type { ParsedWord } from "@/lib/types";
 
+const globalForDb = globalThis as unknown as { postgresPool?: Pool };
+
 export function getDb() {
-  return drizzle({ schema: { words, categories } });
+  const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (!connectionString) {
+    throw new Error("DATABASE_URL is missing. Add a PostgreSQL connection string to Vercel Environment Variables.");
+  }
+  const pool = globalForDb.postgresPool ?? new Pool({ connectionString, max: 5 });
+  globalForDb.postgresPool = pool;
+  return drizzle({ client: pool, schema: { words, categories } });
 }
 
 export async function importWords(userEmail: string, parsed: ParsedWord[], requestedCategoryId?: number | null) {
