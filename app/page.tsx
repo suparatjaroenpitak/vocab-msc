@@ -55,7 +55,8 @@ function getGreeting() {
   return "สวัสดีตอนเย็น";
 }
 
-const WORD_CACHE_PREFIX = "lexiflow:words:";
+const WORD_CACHE_PREFIX = "msc-vocab:words:";
+const LEGACY_WORD_CACHE_PREFIX = "lexiflow:words:";
 
 function selectDueWords(words: Word[]) {
   const now = Date.now();
@@ -66,7 +67,9 @@ function selectDueWords(words: Word[]) {
 
 function readWordCache(identity: string) {
   try {
-    const raw = window.localStorage.getItem(`${WORD_CACHE_PREFIX}${encodeURIComponent(identity)}`);
+    const cacheKey = encodeURIComponent(identity);
+    const raw = window.localStorage.getItem(`${WORD_CACHE_PREFIX}${cacheKey}`)
+      ?? window.localStorage.getItem(`${LEGACY_WORD_CACHE_PREFIX}${cacheKey}`);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { words?: Word[] };
     if (!Array.isArray(parsed.words)) return null;
@@ -190,7 +193,7 @@ function VoiceButton({ text, lang, label }: { text: string; lang: "en-US" | "th-
 
 function AuthGate({ loading }: { loading?: boolean }) {
   const googleReady = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_ENABLED === "true";
-  return <main className="grid min-h-screen place-items-center px-5 py-10"><section className="w-full max-w-md rounded-[32px] border border-ink/10 bg-white p-8 text-center shadow-soft sm:p-10"><div className="mx-auto grid h-16 w-16 place-items-center rounded-3xl bg-ink text-white"><Sparkles size={26} /></div><p className="mt-7 text-xs font-bold uppercase tracking-[0.2em] text-coral">private vocabulary lab</p><h1 className="mt-3 font-display text-4xl font-bold tracking-[-0.04em]">เข้าสู่ LexiFlow</h1><p className="mt-4 text-sm leading-7 text-ink/50">คลังคำศัพท์ของคุณจะถูกแยกตามบัญชี Google แต่ละคนจะเห็นและจัดการคำศัพท์ของตัวเองเท่านั้น</p><button disabled={loading || !googleReady} onClick={() => void signIn("google", { callbackUrl: "/" })} className="mt-8 flex w-full items-center justify-center gap-3 rounded-2xl bg-ink px-5 py-4 text-sm font-bold text-white transition hover:bg-coral disabled:cursor-not-allowed disabled:opacity-40"><LogIn size={17} />{loading ? "กำลังตรวจสอบ session…" : "เข้าสู่ระบบด้วย Google"}</button>{!googleReady && <p className="mt-5 rounded-2xl bg-sand px-4 py-3 text-left text-xs leading-5 text-ink/60">ยังไม่ได้เปิด Google OAuth: ใส่ `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` และตั้ง `NEXT_PUBLIC_GOOGLE_OAUTH_ENABLED=true` ใน `.env` แล้ว restart server</p>}</section></main>;
+  return <main className="grid min-h-screen place-items-center px-5 py-10"><section className="w-full max-w-md rounded-[32px] border border-ink/10 bg-white p-8 text-center shadow-soft sm:p-10"><div className="mx-auto grid h-16 w-16 place-items-center rounded-3xl bg-ink text-white"><Sparkles size={26} /></div><p className="mt-7 text-xs font-bold uppercase tracking-[0.2em] text-coral">msc vocabulary</p><h1 className="mt-3 font-display text-4xl font-bold tracking-[-0.04em]">เข้าสู่ MSC Vocab</h1><p className="mt-4 text-sm leading-7 text-ink/50">คลังคำศัพท์ของคุณจะถูกแยกตามบัญชี Google แต่ละคนจะเห็นและจัดการคำศัพท์ของตัวเองเท่านั้น</p><button disabled={loading || !googleReady} onClick={() => void signIn("google", { callbackUrl: "/" })} className="mt-8 flex w-full items-center justify-center gap-3 rounded-2xl bg-ink px-5 py-4 text-sm font-bold text-white transition hover:bg-coral disabled:cursor-not-allowed disabled:opacity-40"><LogIn size={17} />{loading ? "กำลังตรวจสอบ session…" : "เข้าสู่ระบบด้วย Google"}</button>{!googleReady && <p className="mt-5 rounded-2xl bg-sand px-4 py-3 text-left text-xs leading-5 text-ink/60">ยังไม่ได้เปิด Google OAuth: ใส่ `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` และตั้ง `NEXT_PUBLIC_GOOGLE_OAUTH_ENABLED=true` ใน `.env` แล้ว restart server</p>}</section></main>;
 }
 
 export default function HomePage() {
@@ -323,7 +326,7 @@ export default function HomePage() {
           <div className="flex items-center justify-between px-2">
             <button className="flex items-center gap-3" onClick={() => navigate("dashboard")} aria-label="ไปหน้าแรก">
               <span className="grid h-10 w-10 place-items-center rounded-2xl bg-ink text-white shadow-card"><Sparkles size={18} /></span>
-              <span className="text-left"><span className="block font-display text-xl font-bold tracking-tight">LexiFlow</span><span className="block text-[10px] font-semibold uppercase tracking-[0.22em] text-ink/40">vocabulary lab</span></span>
+              <span className="text-left"><span className="block font-display text-xl font-bold tracking-tight">MSC Vocab</span><span className="block text-[10px] font-semibold uppercase tracking-[0.22em] text-ink/40">english vocabulary</span></span>
             </button>
             <button className="rounded-lg p-2 text-ink/50 lg:hidden" onClick={() => setSidebarOpen(false)} aria-label="ปิดเมนู"><X size={18} /></button>
           </div>

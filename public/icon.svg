@@ -1,7 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <rect width="512" height="512" rx="112" fill="#17233c"/>
-  <path d="M92 174c57-28 116-21 164 12v168c-48-33-107-40-164-12V174Z" fill="#fff"/>
-  <path d="M420 174c-57-28-116-21-164 12v168c48-33 107-40 164-12V174Z" fill="#f6f4ee"/>
-  <path d="M256 186v168M116 218c43-15 83-9 117 9M116 264c43-15 83-9 117 9M396 218c-43-15-83-9-117 9M396 264c-43-15-83-9-117 9" fill="none" stroke="#17233c" stroke-linecap="round" stroke-linejoin="round" stroke-width="13"/>
-  <path d="m354 92 12 28 29 12-29 12-12 29-12-29-29-12 29-12 12-28Z" fill="#f26755"/>
+  <path d="m400 82 13 30 31 13-31 13-13 30-13-30-30-13 30-13 13-30Z" fill="#f26755"/>
+  <path d="M66 174c65-29 129-26 190 7 61-33 125-36 190-7v221c-65-27-129-22-190 15-61-37-125-42-190-15V174Z" fill="#f6f4ee"/>
+  <path d="M256 181v236" fill="none" stroke="#d5d3cc" stroke-linecap="round" stroke-width="10"/>
+  <text x="256" y="305" fill="#17233c" font-family="Arial, Helvetica, sans-serif" font-size="126" font-weight="800" letter-spacing="-8" text-anchor="middle">MSC</text>
+  <text x="256" y="364" fill="#f26755" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="700" letter-spacing="10" text-anchor="middle">VOCAB</text>
 </svg>

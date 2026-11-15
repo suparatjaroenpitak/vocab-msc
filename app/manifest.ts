@@ -3,8 +3,8 @@ import type { MetadataRoute } from "next";
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: "/",
-    name: "LexiFlow — ฝึกศัพท์อังกฤษให้จำได้จริง",
-    short_name: "LexiFlow",
+    name: "MSC Vocab — ฝึกศัพท์อังกฤษให้จำได้จริง",
+    short_name: "MSC Vocab",
     description: "คลังคำศัพท์ส่วนตัว พร้อมทบทวนและฝึกควิซ",
     start_url: "/",
     scope: "/",

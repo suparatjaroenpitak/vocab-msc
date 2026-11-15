@@ -1,4 +1,4 @@
-# LexiFlow
+# MSC Vocab
 
 แอป Next.js + Tailwind + PostgreSQL สำหรับเรียนรู้คำศัพท์อังกฤษด้วยการนำเข้า, ทบทวนแบบ spaced repetition และควิซ
 
