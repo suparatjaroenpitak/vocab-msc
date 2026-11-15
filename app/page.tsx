@@ -83,20 +83,108 @@ function saveWordCache(identity: string, words: Word[]) {
   }
 }
 
-function speakText(text: string, lang: "en-US" | "th-TH") {
+type SpeechLanguage = { locale: string; label: string; name: string };
+
+const speechLanguageRules: Array<{ pattern: RegExp; locale: string; label: string; name: string }> = [
+  { pattern: /[\u3040-\u30ff\u31f0-\u31ff]/, locale: "ja-JP", label: "日本語", name: "ภาษาญี่ปุ่น" },
+  { pattern: /[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/, locale: "ko-KR", label: "한국어", name: "ภาษาเกาหลี" },
+  { pattern: /[\u0e00-\u0e7f]/, locale: "th-TH", label: "ไทย", name: "ภาษาไทย" },
+  { pattern: /[\u0e80-\u0eff]/, locale: "lo-LA", label: "ລາວ", name: "ภาษาลาว" },
+  { pattern: /[\u1780-\u17ff\u19e0-\u19ff]/, locale: "km-KH", label: "ខ្មែរ", name: "ภาษาเขมร" },
+  { pattern: /[\u1000-\u109f\uaa60-\uaa7f\ua9e0-\ua9ff]/, locale: "my-MM", label: "မြန်မာ", name: "ภาษาพม่า" },
+  { pattern: /(?:[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]|[\ud840-\ud87f][\udc00-\udfff])/, locale: "zh-CN", label: "中文", name: "ภาษาจีน" },
+  { pattern: /[پچژگ]/, locale: "fa-IR", label: "فارسی", name: "ภาษาเปอร์เซีย" },
+  { pattern: /[ٹڈڑںھے]/, locale: "ur-PK", label: "اردو", name: "ภาษาอูรดู" },
+  { pattern: /[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff]/, locale: "ar-SA", label: "العربية", name: "ภาษาอาหรับ" },
+  { pattern: /[іїєґ]/i, locale: "uk-UA", label: "Українська", name: "ภาษายูเครน" },
+  { pattern: /[\u0400-\u04ff\u0500-\u052f]/, locale: "ru-RU", label: "Русский", name: "ภาษารัสเซีย" },
+  { pattern: /[\u0590-\u05ff]/, locale: "he-IL", label: "עברית", name: "ภาษาฮีบรู" },
+  { pattern: /[\u0370-\u03ff\u1f00-\u1fff]/, locale: "el-GR", label: "Ελληνικά", name: "ภาษากรีก" },
+  { pattern: /[\u0900-\u097f]/, locale: "hi-IN", label: "हिन्दी", name: "ภาษาฮินดี" },
+  { pattern: /[\u0980-\u09ff]/, locale: "bn-BD", label: "বাংলা", name: "ภาษาเบงกาลี" },
+  { pattern: /[\u0a80-\u0aff]/, locale: "gu-IN", label: "ગુજરાતી", name: "ภาษาคุชราต" },
+  { pattern: /[\u0a00-\u0a7f]/, locale: "pa-IN", label: "ਪੰਜਾਬੀ", name: "ภาษาปัญจาบ" },
+  { pattern: /[\u0b80-\u0bff]/, locale: "ta-IN", label: "தமிழ்", name: "ภาษาทมิฬ" },
+  { pattern: /[\u0c00-\u0c7f]/, locale: "te-IN", label: "తెలుగు", name: "ภาษาเตลูกู" },
+  { pattern: /[\u0c80-\u0cff]/, locale: "kn-IN", label: "ಕನ್ನಡ", name: "ภาษากันนาดา" },
+  { pattern: /[\u0d00-\u0d7f]/, locale: "ml-IN", label: "മലയാളം", name: "ภาษามาลายาลัม" },
+  { pattern: /[\u0d80-\u0dff]/, locale: "si-LK", label: "සිංහල", name: "ภาษาสิงหล" },
+  { pattern: /[\u0530-\u058f]/, locale: "hy-AM", label: "Հայերեն", name: "ภาษาอาร์เมเนีย" },
+  { pattern: /[\u10a0-\u10ff\u2d00-\u2d2f]/, locale: "ka-GE", label: "ქართული", name: "ภาษาจอร์เจีย" },
+  { pattern: /[\u1200-\u137f]/, locale: "am-ET", label: "አማርኛ", name: "ภาษาอัมฮารา" },
+  { pattern: /[ğışİ]/, locale: "tr-TR", label: "Türkçe", name: "ภาษาตุรกี" },
+  { pattern: /[łąćęńśźżŁĄĆĘŃŚŹŻ]/, locale: "pl-PL", label: "Polski", name: "ภาษาโปแลนด์" },
+  { pattern: /[ľĺŕĽĹŔ]/, locale: "sk-SK", label: "Slovenčina", name: "ภาษาสโลวัก" },
+  { pattern: /[čďěňřšťůžČĎĚŇŘŠŤŮŽ]/, locale: "cs-CZ", label: "Čeština", name: "ภาษาเช็ก" },
+  { pattern: /[ăîșțşţĂÎȘȚŞŢ]/, locale: "ro-RO", label: "Română", name: "ภาษาโรมาเนีย" },
+  { pattern: /[đơưĐƠƯ]/, locale: "vi-VN", label: "Tiếng Việt", name: "ภาษาเวียดนาม" },
+  { pattern: /[ìòÌÒ]/, locale: "it-IT", label: "Italiano", name: "ภาษาอิตาลี" }
+];
+
+function detectSpeechLanguage(text: string, fallback: "en-US" | "th-TH"): SpeechLanguage {
+  const detected = speechLanguageRules.find(({ pattern }) => pattern.test(text));
+  if (detected) return detected;
+  if (/[ñ¿¡áíóú]/i.test(text)) return { locale: "es-ES", label: "Español", name: "ภาษาสเปน" };
+  if (/[ãõ]/i.test(text) || /ão|ões/i.test(text)) return { locale: "pt-BR", label: "Português", name: "ภาษาโปรตุเกส" };
+  if (/[àâçèêëîïôùûüÿœæé]/i.test(text)) return { locale: "fr-FR", label: "Français", name: "ภาษาฝรั่งเศส" };
+  if (/[äöß]/i.test(text)) return { locale: "de-DE", label: "Deutsch", name: "ภาษาเยอรมัน" };
+  return fallback === "th-TH"
+    ? { locale: fallback, label: "ไทย", name: "ภาษาไทย" }
+    : { locale: fallback, label: "EN", name: "ภาษาอังกฤษ" };
+}
+
+let speechRequestId = 0;
+let speechVoices: SpeechSynthesisVoice[] = [];
+let speechVoicesRequest: Promise<SpeechSynthesisVoice[]> | null = null;
+
+function loadSpeechVoices(): Promise<SpeechSynthesisVoice[]> {
+  const synthesis = window.speechSynthesis;
+  const currentVoices = synthesis.getVoices();
+  if (currentVoices.length) {
+    speechVoices = currentVoices;
+    return Promise.resolve(currentVoices);
+  }
+  if (speechVoices.length) return Promise.resolve(speechVoices);
+  if (speechVoicesRequest) return speechVoicesRequest;
+
+  speechVoicesRequest = new Promise<SpeechSynthesisVoice[]>((resolve) => {
+    let timeoutId: number | undefined;
+    const finish = () => {
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+      synthesis.removeEventListener("voiceschanged", finish);
+      const voices = synthesis.getVoices();
+      if (voices.length) speechVoices = voices;
+      resolve(voices);
+    };
+    synthesis.addEventListener("voiceschanged", finish, { once: true });
+    timeoutId = window.setTimeout(finish, 700);
+  }).finally(() => { speechVoicesRequest = null; });
+  return speechVoicesRequest;
+}
+
+async function speakText(text: string, lang: string) {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-  window.speechSynthesis.cancel();
+  const synthesis = window.speechSynthesis;
+  synthesis.cancel();
+  const requestId = ++speechRequestId;
+  const voices = await loadSpeechVoices();
+  if (requestId !== speechRequestId) return;
+
+  const languageCode = lang.split("-")[0].toLowerCase();
+  const voice = voices.find((item) => item.lang.toLowerCase() === lang.toLowerCase())
+    ?? voices.find((item) => item.lang.toLowerCase().startsWith(`${languageCode}-`));
   const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = lang;
-  utterance.rate = lang === "en-US" ? 0.82 : 0.9;
-  const languagePrefix = lang.slice(0, 2);
-  const voice = window.speechSynthesis.getVoices().find((item) => item.lang.toLowerCase().startsWith(languagePrefix));
+  utterance.lang = voice?.lang || lang;
+  utterance.rate = languageCode === "th" ? 0.9 : 0.85;
   if (voice) utterance.voice = voice;
-  window.speechSynthesis.speak(utterance);
+  synthesis.speak(utterance);
 }
 
 function VoiceButton({ text, lang, label }: { text: string; lang: "en-US" | "th-TH"; label: string }) {
-  return <button type="button" onClick={(event) => { event.stopPropagation(); speakText(text, lang); }} className="inline-flex items-center gap-1.5 rounded-xl border border-ink/10 bg-white px-2.5 py-2 text-xs font-bold text-ink/55 transition hover:border-coral/40 hover:text-coral" aria-label={label} title={label}><Volume2 size={14} />{lang === "en-US" ? "EN" : "ไทย"}</button>;
+  const speechLanguage = detectSpeechLanguage(text, lang);
+  const actionLabel = label.includes("คำแปล") ? "ฟังคำแปล" : "ฟังคำศัพท์";
+  const accessibleLabel = `${actionLabel} · ${speechLanguage.name}`;
+  return <button type="button" onClick={(event) => { event.stopPropagation(); void speakText(text, speechLanguage.locale); }} className="inline-flex items-center gap-1.5 rounded-xl border border-ink/10 bg-white px-2.5 py-2 text-xs font-bold text-ink/55 transition hover:border-coral/40 hover:text-coral" aria-label={accessibleLabel} title={accessibleLabel}><Volume2 size={14} />{speechLanguage.label}</button>;
 }
 
 function AuthGate({ loading }: { loading?: boolean }) {
@@ -118,6 +206,10 @@ export default function HomePage() {
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
   const learnerKey = session?.user?.email?.trim().toLowerCase() || null;
+
+  useEffect(() => {
+    if ("speechSynthesis" in window) void loadSpeechVoices();
+  }, []);
 
   const loadWords = useCallback(async (identity: string) => {
     const cached = readWordCache(identity);
