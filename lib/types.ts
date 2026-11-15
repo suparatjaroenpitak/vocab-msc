@@ -3,6 +3,8 @@ export type Word = {
   term: string;
   part_of_speech: string;
   definition: string;
+  category_id: number | null;
+  category_name: string | null;
   example: string | null;
   interval_days: number;
   due_at: string;
@@ -10,6 +12,12 @@ export type Word = {
   correct_count: number;
   last_reviewed: string | null;
   created_at: string;
+};
+
+export type Category = {
+  id: number;
+  name: string;
+  word_count: number;
 };
 
 export type ReviewRating = "known" | "again";

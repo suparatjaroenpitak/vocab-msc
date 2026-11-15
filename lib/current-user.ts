@@ -3,5 +3,5 @@ import { authOptions } from "@/lib/auth";
 
 export async function getCurrentUserEmail() {
   const session = await getServerSession(authOptions);
-  return session?.user?.email?.toLowerCase() || "demo@local";
+  return session?.user?.email?.trim().toLowerCase() || null;
 }

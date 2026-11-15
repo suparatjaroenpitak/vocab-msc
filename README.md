@@ -8,21 +8,21 @@
 
 ```bash
 npm install
-copy .env.example .env.local
+copy .env.example .env
 netlify dev --port 8889
 ```
 
-เปิด `http://localhost:8889` ได้ทันที โหมดเริ่มต้นใช้ผู้ใช้เดโม่ `demo@local` 
+เปิด `http://localhost:8889` แล้ว login ด้วย Google ก่อนใช้งาน คำศัพท์และหมวดหมู่จะถูกผูกกับอีเมลของบัญชีที่ login อยู่ ไม่มีโหมดผู้ใช้ร่วมกัน
 
 ## Google OAuth
 
-สร้าง OAuth Client ใน Google Cloud แล้วใส่ค่า `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `NEXTAUTH_SECRET` และ `NEXTAUTH_URL` ใน `.env.local` จากนั้นเพิ่ม callback URL:
+สร้าง OAuth Client ใน Google Cloud แล้วใส่ค่า `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL` และ `NEXT_PUBLIC_GOOGLE_OAUTH_ENABLED=true` ใน `.env` จากนั้นเพิ่ม callback URL:
 
 ```text
 http://localhost:8889/api/auth/callback/google
 ```
 
-เมื่อผู้ใช้ล็อกอินด้วย Google คำศัพท์จะถูกแยกตามอีเมลของผู้ใช้ใน Netlify Database (Postgres)
+เมื่อผู้ใช้ล็อกอินด้วย Google คำศัพท์และหมวดหมู่จะถูกแยกตามอีเมลของผู้ใช้ใน Netlify Database (Postgres) ทุก API ตรวจ session และตอบ `401` หากยังไม่ได้ login
 
 ## รูปแบบนำเข้า
 

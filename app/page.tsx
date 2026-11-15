@@ -30,9 +30,9 @@ import {
   Zap
 } from "lucide-react";
 import { requestJson } from "@/lib/request-json";
-import type { ReviewRating, Word } from "@/lib/types";
+import type { Category, ReviewRating, Word } from "@/lib/types";
 
-type Tab = "dashboard" | "review" | "quiz" | "import";
+type Tab = "dashboard" | "review" | "quiz" | "fill" | "import";
 
 const sampleImport = `1. airborne (adj.) - ทางอากาศ, ทหารพลร่ม
 2. landing (n.) - การลงจอด, การยกพลขึ้นบก
@@ -91,6 +91,11 @@ function VoiceButton({ text, lang, label }: { text: string; lang: "en-US" | "th-
   return <button type="button" onClick={(event) => { event.stopPropagation(); speakText(text, lang); }} className="inline-flex items-center gap-1.5 rounded-xl border border-ink/10 bg-white px-2.5 py-2 text-xs font-bold text-ink/55 transition hover:border-coral/40 hover:text-coral" aria-label={label} title={label}><Volume2 size={14} />{lang === "en-US" ? "EN" : "ไทย"}</button>;
 }
 
+function AuthGate({ loading }: { loading?: boolean }) {
+  const googleReady = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_ENABLED === "true";
+  return <main className="grid min-h-screen place-items-center px-5 py-10"><section className="w-full max-w-md rounded-[32px] border border-ink/10 bg-white p-8 text-center shadow-soft sm:p-10"><div className="mx-auto grid h-16 w-16 place-items-center rounded-3xl bg-ink text-white"><Sparkles size={26} /></div><p className="mt-7 text-xs font-bold uppercase tracking-[0.2em] text-coral">private vocabulary lab</p><h1 className="mt-3 font-display text-4xl font-bold tracking-[-0.04em]">เข้าสู่ LexiFlow</h1><p className="mt-4 text-sm leading-7 text-ink/50">คลังคำศัพท์ของคุณจะถูกแยกตามบัญชี Google แต่ละคนจะเห็นและจัดการคำศัพท์ของตัวเองเท่านั้น</p><button disabled={loading || !googleReady} onClick={() => void signIn("google", { callbackUrl: "/" })} className="mt-8 flex w-full items-center justify-center gap-3 rounded-2xl bg-ink px-5 py-4 text-sm font-bold text-white transition hover:bg-coral disabled:cursor-not-allowed disabled:opacity-40"><LogIn size={17} />{loading ? "กำลังตรวจสอบ session…" : "เข้าสู่ระบบด้วย Google"}</button>{!googleReady && <p className="mt-5 rounded-2xl bg-sand px-4 py-3 text-left text-xs leading-5 text-ink/60">ยังไม่ได้เปิด Google OAuth: ใส่ `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` และตั้ง `NEXT_PUBLIC_GOOGLE_OAUTH_ENABLED=true` ใน `.env` แล้ว restart server</p>}</section></main>;
+}
+
 export default function HomePage() {
   const { data: session, status } = useSession();
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
@@ -99,10 +104,13 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const learnerKey = session?.user?.email?.toLowerCase() || (status === "unauthenticated" ? "demo@local" : null);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [learningCategoryId, setLearningCategoryId] = useState<number | null>(null);
+  const learnerKey = session?.user?.email?.trim().toLowerCase() || null;
 
-  const loadWords = useCallback(async (identity: string) => {
-    const cached = readWordCache(identity);
+  const loadWords = useCallback(async (identity: string, categoryId: number | null = null) => {
+    const cacheIdentity = `${identity}:category:${categoryId ?? "all"}`;
+    const cached = readWordCache(cacheIdentity);
     if (cached) {
       setWords(cached.words);
       setDueWords(cached.dueWords);
@@ -111,13 +119,14 @@ export default function HomePage() {
       setLoading(true);
     }
     try {
-      const [allResponse, dueResponse] = await Promise.all([fetch("/api/words", { signal: AbortSignal.timeout(30_000) }), fetch("/api/words?mode=due", { signal: AbortSignal.timeout(30_000) })]);
+      const categoryQuery = categoryId ? `&categoryId=${categoryId}` : "";
+      const [allResponse, dueResponse] = await Promise.all([fetch("/api/words", { signal: AbortSignal.timeout(30_000) }), fetch(`/api/words?mode=due${categoryQuery}`, { signal: AbortSignal.timeout(30_000) })]);
       if (!allResponse.ok || !dueResponse.ok) throw new Error("โหลดคลังคำศัพท์ไม่สำเร็จ");
       const nextWords = (await allResponse.json()) as Word[];
       const nextDueWords = (await dueResponse.json()) as Word[];
       setWords(nextWords);
       setDueWords(nextDueWords);
-      saveWordCache(identity, nextWords, nextDueWords);
+      saveWordCache(cacheIdentity, nextWords, nextDueWords);
     } catch {
       if (!cached) {
         setWords([]);
@@ -128,7 +137,11 @@ export default function HomePage() {
     }
   }, []);
 
-  useEffect(() => { if (learnerKey) void loadWords(learnerKey); }, [loadWords, learnerKey]);
+  useEffect(() => {
+    if (!learnerKey) return;
+    void loadWords(learnerKey, learningCategoryId);
+    void fetch("/api/categories", { signal: AbortSignal.timeout(30_000) }).then((response) => response.json()).then((data) => setCategories(data as Category[]));
+  }, [loadWords, learnerKey, learningCategoryId]);
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(null), 3200);
@@ -137,6 +150,7 @@ export default function HomePage() {
 
   const reviewedToday = useMemo(() => words.filter((word) => word.last_reviewed?.slice(0, 10) === new Date().toISOString().slice(0, 10)).length, [words]);
   const mastered = useMemo(() => words.filter((word) => word.interval_days >= 7).length, [words]);
+  const learningWords = useMemo(() => learningCategoryId ? words.filter((word) => word.category_id === learningCategoryId) : words, [learningCategoryId, words]);
 
   function navigate(tab: Tab) {
     setActiveTab(tab);
@@ -146,8 +160,11 @@ export default function HomePage() {
   async function reviewWord(id: number, rating: ReviewRating) {
     await fetch(`/api/words/${id}/review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rating }) });
     setToast(rating === "known" ? "เก็บคำนี้เข้าความจำระยะยาวแล้ว" : "บันทึกไว้ทบทวนอีกครั้งใน 10 นาที");
-    if (learnerKey) await loadWords(learnerKey);
+    if (learnerKey) await loadWords(learnerKey, learningCategoryId);
   }
+
+  if (status === "loading") return <AuthGate loading />;
+  if (!session?.user?.email) return <AuthGate />;
 
   return (
     <main className="min-h-screen">
@@ -166,6 +183,7 @@ export default function HomePage() {
             <NavItem active={activeTab === "dashboard"} icon={<LayoutDashboard size={18} />} label="ภาพรวม" onClick={() => navigate("dashboard")} />
             <NavItem active={activeTab === "review"} icon={<RotateCcw size={18} />} label="ทบทวนวันนี้" badge={dueWords.length} onClick={() => navigate("review")} />
             <NavItem active={activeTab === "quiz"} icon={<CircleHelp size={18} />} label="ควิซคำศัพท์" onClick={() => navigate("quiz")} />
+            <NavItem active={activeTab === "fill"} icon={<GraduationCap size={18} />} label="เติมคำจากคำแปล" onClick={() => navigate("fill")} />
             <NavItem active={activeTab === "import"} icon={<FileUp size={18} />} label="นำเข้าคำศัพท์" onClick={() => navigate("import")} />
           </nav>
 
@@ -185,7 +203,7 @@ export default function HomePage() {
         <section className="min-w-0 flex-1 px-5 py-5 sm:px-8 lg:px-12 lg:py-8">
           <header className="flex items-center justify-between gap-4">
             <button className="rounded-xl border border-ink/10 bg-white/70 p-2.5 lg:hidden" onClick={() => setSidebarOpen(true)} aria-label="เปิดเมนู"><Menu size={19} /></button>
-            <div className="hidden items-center gap-2 text-sm text-ink/40 sm:flex"><span className="h-2 w-2 rounded-full bg-emerald-400" /> ระบบพร้อมใช้งาน <span className="text-ink/20">/</span> {activeTab === "dashboard" ? "ภาพรวม" : activeTab === "review" ? "ทบทวน" : activeTab === "quiz" ? "ควิซ" : "นำเข้า"}</div>
+            <div className="hidden items-center gap-2 text-sm text-ink/40 sm:flex"><span className="h-2 w-2 rounded-full bg-emerald-400" /> ระบบพร้อมใช้งาน <span className="text-ink/20">/</span> {activeTab === "dashboard" ? "ภาพรวม" : activeTab === "review" ? "ทบทวน" : activeTab === "quiz" ? "ควิซ" : activeTab === "fill" ? "เติมคำ" : "นำเข้า"}</div>
             <div className="ml-auto flex items-center gap-3">
               <div className="hidden text-right sm:block"><p className="text-xs font-semibold text-ink/40">{session?.user?.email ? "บัญชีของคุณ" : "โหมดทดลอง"}</p><p className="text-sm font-bold">{session?.user?.name || "Guest learner"}</p></div>
               <div className="grid h-10 w-10 place-items-center rounded-2xl bg-coral/15 font-bold text-coral">{session?.user?.name?.slice(0, 1).toUpperCase() || "G"}</div>
@@ -194,10 +212,12 @@ export default function HomePage() {
           </header>
 
           <div className="mx-auto max-w-[1100px]">
+            {(activeTab === "review" || activeTab === "quiz" || activeTab === "fill") && <LearningScope categories={categories} value={learningCategoryId} onChange={setLearningCategoryId} />}
             {activeTab === "dashboard" && <Dashboard words={words} dueWords={dueWords} mastered={mastered} reviewedToday={reviewedToday} loading={loading} onNavigate={navigate} />}
             {activeTab === "review" && <ReviewView words={dueWords} loading={loading} onReview={reviewWord} onNavigate={navigate} />}
-            {activeTab === "quiz" && <QuizView words={words} onToast={setToast} />}
-            {activeTab === "import" && <ImportView onDone={async (message) => { setToast(message); if (learnerKey) await loadWords(learnerKey); navigate("dashboard"); }} />}
+            {activeTab === "quiz" && <QuizView words={learningWords} onToast={setToast} />}
+            {activeTab === "fill" && <FillView words={learningWords} onToast={setToast} />}
+            {activeTab === "import" && <ImportView categories={categories} onCategoryCreated={(category) => setCategories((current) => [...current, category])} onDone={async (message) => { setToast(message); if (learnerKey) await loadWords(learnerKey, learningCategoryId); const response = await fetch("/api/categories"); setCategories((await response.json()) as Category[]); navigate("dashboard"); }} />}
           </div>
         </section>
       </div>
@@ -208,6 +228,10 @@ export default function HomePage() {
 
 function NavItem({ active, icon, label, badge, onClick }: { active: boolean; icon: React.ReactNode; label: string; badge?: number; onClick: () => void }) {
   return <button onClick={onClick} className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm font-semibold transition ${active ? "bg-ink text-white shadow-card" : "text-ink/55 hover:bg-ink/5 hover:text-ink"}`}><span className={active ? "text-coral" : "text-ink/40 group-hover:text-coral"}>{icon}</span><span className="flex-1">{label}</span>{badge ? <span className={`rounded-full px-2 py-0.5 text-[11px] ${active ? "bg-white/10 text-white" : "bg-coral/10 text-coral"}`}>{badge}</span> : null}</button>;
+}
+
+function LearningScope({ categories, value, onChange }: { categories: Category[]; value: number | null; onChange: (value: number | null) => void }) {
+  return <div className="mt-7 flex flex-col gap-3 rounded-2xl border border-ink/10 bg-white px-4 py-3 shadow-card sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-xl bg-lilac text-ink"><Target size={16} /></span><div><p className="text-xs font-bold uppercase tracking-[0.14em] text-ink/35">learning scope</p><p className="text-sm font-bold">เลือกคลังที่จะเรียนรู้</p></div></div><select value={value ?? ""} onChange={(event) => onChange(event.target.value ? Number(event.target.value) : null)} className="rounded-xl border border-ink/10 bg-cream px-3 py-2.5 text-sm font-semibold outline-none focus:border-coral"><option value="">ทุกคำศัพท์</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name} · {category.word_count} คำ</option>)}</select></div>;
 }
 
 function Dashboard({ words, dueWords, mastered, reviewedToday, loading, onNavigate }: { words: Word[]; dueWords: Word[]; mastered: number; reviewedToday: number; loading: boolean; onNavigate: (tab: Tab) => void }) {
@@ -255,9 +279,78 @@ function QuizView({ words, onToast }: { words: Word[]; onToast: (message: string
   return <div className="mx-auto max-w-2xl py-10 lg:py-14"><div className="flex items-center justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-coral">question {questionIndex + 1} / {quizWords.length}</p><h1 className="mt-3 font-display text-3xl font-bold">เลือกคำแปลที่ตรงที่สุด</h1></div><div className="rounded-2xl bg-white px-4 py-3 text-center shadow-card"><p className="text-[10px] font-bold uppercase tracking-widest text-ink/35">score</p><p className="font-display text-xl font-bold">{score}</p></div></div><div className="mt-8 rounded-[32px] border border-ink/10 bg-white p-7 text-center shadow-soft sm:p-12"><div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-lilac text-ink"><CircleHelp size={23} /></div><p className="mt-7 text-sm font-bold text-ink/35">คำศัพท์นี้แปลว่าอะไร?</p><h2 className="mt-3 font-display text-5xl font-bold tracking-[-0.05em]">{current.term}</h2><div className="mt-5 flex justify-center"><VoiceButton text={current.term} lang="en-US" label="ฟังคำศัพท์ภาษาอังกฤษ" /></div><div className="mt-10 grid gap-3 text-left">{options.map((option) => <button key={option.id} onClick={() => answer(option.term)} className={`flex items-center justify-between rounded-2xl border px-4 py-4 text-sm font-semibold transition ${selected ? option.term === current.term ? "border-emerald-400 bg-mint" : option.term === selected ? "border-coral bg-coral/10" : "border-ink/8 opacity-50" : "border-ink/10 hover:border-coral hover:bg-coral/5"}`}><span>{option.definition}</span>{selected && option.term === current.term && <Check size={17} className="text-emerald-600" />}</button>)}</div></div></div>;
 }
 
-function ImportView({ onDone }: { onDone: (message: string) => Promise<void> }) {
+function FillView({ words, onToast }: { words: Word[]; onToast: (message: string) => void }) {
+  const [mode, setMode] = useState<"letters" | "chunks">("letters");
+  const [pool, setPool] = useState<Word[]>([]);
+  const [index, setIndex] = useState(0);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [feedback, setFeedback] = useState<"correct" | "wrong" | null>(null);
+  const current = pool[index];
+  const parts = useMemo(() => {
+    if (!current) return [];
+    const values = mode === "letters" ? Array.from(current.term.replace(/\s/g, "")) : current.term.trim().split(/\s+/);
+    return values.map((text, partIndex) => ({ id: `${partIndex}-${text}`, text }));
+  }, [current, mode]);
+  const answer = selected.map((id) => parts.find((part) => part.id === id)?.text || "").join(mode === "letters" ? "" : " ");
+
+  useEffect(() => {
+    setPool([...words].sort(() => Math.random() - 0.5));
+    setIndex(0);
+    setSelected([]);
+    setFeedback(null);
+  }, [words]);
+
+  function choosePart(id: string) {
+    if (feedback || selected.includes(id)) return;
+    setSelected((currentSelection) => [...currentSelection, id]);
+  }
+
+  function checkAnswer() {
+    if (!current || selected.length !== parts.length) return;
+    const normalize = (value: string) => mode === "letters" ? value.toLowerCase().replace(/\s/g, "") : value.toLowerCase().replace(/\s+/g, " ").trim();
+    const correct = normalize(answer) === normalize(current.term);
+    setFeedback(correct ? "correct" : "wrong");
+    if (correct) onToast("ตอบถูก! เก่งมาก");
+  }
+
+  function nextQuestion() {
+    if (!pool.length) return;
+    setIndex((currentIndex) => (currentIndex + 1) % pool.length);
+    setSelected([]);
+    setFeedback(null);
+  }
+
+  if (!words.length) return <div className="py-20 text-center"><PageTitle eyebrow="fill mode" title="ยังไม่มีคำศัพท์ให้เติม" description="เพิ่มคำศัพท์หรือเปลี่ยนหมวดหมู่การเรียนรู้ก่อนเริ่มโหมดนี้" /></div>;
+  if (!current) return null;
+  return <div className="mx-auto max-w-3xl py-10 lg:py-14"><PageTitle eyebrow="fill mode · thai prompt" title="เติมคำจากคำแปลภาษาไทย" description="อ่านโจทย์ภาษาไทย แล้วเลือกตัวอักษรหรือกลุ่มคำให้เรียงเป็นคำศัพท์ภาษาอังกฤษ" /><div className="mt-7 flex gap-2 rounded-2xl bg-ink/5 p-1.5 sm:w-fit"><button onClick={() => { setMode("letters"); setSelected([]); setFeedback(null); }} className={`rounded-xl px-4 py-2.5 text-sm font-bold ${mode === "letters" ? "bg-white text-ink shadow-sm" : "text-ink/45"}`}>เลือกตัวอักษร</button><button onClick={() => { setMode("chunks"); setSelected([]); setFeedback(null); }} className={`rounded-xl px-4 py-2.5 text-sm font-bold ${mode === "chunks" ? "bg-white text-ink shadow-sm" : "text-ink/45"}`}>เลือกกลุ่มคำ</button></div><section className="mt-6 overflow-hidden rounded-[32px] border border-ink/10 bg-white shadow-soft"><div className="bg-ink px-7 py-5 text-white sm:px-10"><div className="flex items-center justify-between"><span className="text-xs font-bold uppercase tracking-[0.16em] text-white/45">โจทย์ภาษาไทย</span><span className="text-xs font-semibold text-white/45">{index + 1} / {pool.length}</span></div><p className="mt-5 text-2xl font-bold leading-10 sm:text-3xl">{current.definition}</p><div className="mt-5 flex gap-2"><VoiceButton text={current.definition} lang="th-TH" label="ฟังโจทย์ภาษาไทย" /><VoiceButton text={current.term} lang="en-US" label="ฟังคำตอบภาษาอังกฤษ" /></div></div><div className="p-7 sm:p-10"><div className={`min-h-20 rounded-2xl border-2 border-dashed px-5 py-5 text-center font-display text-3xl font-bold tracking-[0.08em] ${feedback === "correct" ? "border-emerald-400 bg-mint text-emerald-700" : feedback === "wrong" ? "border-coral bg-coral/10 text-coral" : "border-ink/15 text-ink"}`}>{answer || <span className="text-ink/20">เลือกคำตอบด้านล่าง</span>}</div><div className="mt-7 flex flex-wrap justify-center gap-2">{parts.map((part) => <button key={part.id} disabled={selected.includes(part.id) || Boolean(feedback)} onClick={() => choosePart(part.id)} className={`grid min-h-12 min-w-12 place-items-center rounded-2xl border px-3 text-lg font-bold transition ${selected.includes(part.id) ? "border-ink/10 bg-ink/5 text-ink/25" : "border-ink/10 bg-white text-ink hover:-translate-y-0.5 hover:border-coral hover:text-coral"}`}>{part.text}</button>)}</div><div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">{feedback ? <button onClick={nextQuestion} className="flex items-center justify-center gap-2 rounded-2xl bg-ink px-6 py-3.5 text-sm font-bold text-white">คำถัดไป <ArrowRight size={16} /></button> : <button disabled={selected.length !== parts.length} onClick={checkAnswer} className="rounded-2xl bg-coral px-6 py-3.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-35">ตรวจคำตอบ</button>}{feedback === "wrong" && <button onClick={() => { setSelected([]); setFeedback(null); }} className="rounded-2xl border border-ink/10 px-6 py-3.5 text-sm font-bold text-ink/60">ลองใหม่</button>}</div>{feedback === "wrong" && <p className="mt-5 text-center text-sm font-semibold text-coral">คำตอบที่ถูกคือ <span className="font-bold">{current.term}</span></p>}</div></section></div>;
+}
+
+function CategoryPicker({ categories, value, onChange, onCreated }: { categories: Category[]; value: string; onChange: (value: string) => void; onCreated: (category: Category) => void }) {
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function createCategory() {
+    if (!name.trim() || busy) return;
+    setBusy(true);
+    try {
+      const category = await requestJson<Category>("/api/categories", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+      onCreated(category);
+      onChange(String(category.id));
+      setName("");
+      setCreating(false);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "สร้างหมวดหมู่ไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return <div className="rounded-2xl border border-ink/10 bg-cream p-3"><div className="flex items-center justify-between gap-3"><label className="text-xs font-bold uppercase tracking-[0.14em] text-ink/40">หมวดหมู่</label><button type="button" onClick={() => setCreating((current) => !current)} className="text-xs font-bold text-coral hover:underline">{creating ? "ยกเลิก" : "+ สร้างใหม่"}</button></div><select value={value} onChange={(event) => onChange(event.target.value)} className="mt-2 w-full rounded-xl border border-ink/10 bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-coral"><option value="">จัดหมวดหมู่อัตโนมัติ</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name} · {category.word_count} คำ</option>)}</select>{creating && <div className="mt-2 flex gap-2"><input value={name} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void createCategory(); }} placeholder="ชื่อหมวดหมู่ใหม่" className="min-w-0 flex-1 rounded-xl border border-ink/10 bg-white px-3 py-2 text-sm outline-none focus:border-coral" /><button type="button" disabled={busy || !name.trim()} onClick={() => void createCategory()} className="rounded-xl bg-ink px-3 py-2 text-xs font-bold text-white disabled:opacity-40">สร้าง</button></div>}</div>;
+}
+
+function ImportView({ categories, onCategoryCreated, onDone }: { categories: Category[]; onCategoryCreated: (category: Category) => void; onDone: (message: string) => Promise<void> }) {
   const [text, setText] = useState("");
   const [manual, setManual] = useState({ term: "", partOfSpeech: "", definition: "" });
+  const [categoryId, setCategoryId] = useState("");
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<"paste" | "manual">("paste");
   const [error, setError] = useState<string | null>(null);
@@ -267,7 +360,7 @@ function ImportView({ onDone }: { onDone: (message: string) => Promise<void> }) 
     setError(null);
     try {
       const payload = await requestJson<{ imported: number }>("/api/words/import", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text })
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, categoryId: categoryId ? Number(categoryId) : null })
       });
       setText("");
       await onDone(`นำเข้าคำศัพท์สำเร็จ ${payload.imported} คำ`);
@@ -283,7 +376,7 @@ function ImportView({ onDone }: { onDone: (message: string) => Promise<void> }) 
     setError(null);
     try {
       await requestJson("/api/words", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(manual)
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...manual, categoryId: categoryId ? Number(categoryId) : null })
       });
       setManual({ term: "", partOfSpeech: "", definition: "" });
       await onDone("เพิ่มคำศัพท์ 1 คำแล้ว");
@@ -293,7 +386,7 @@ function ImportView({ onDone }: { onDone: (message: string) => Promise<void> }) 
       setBusy(false);
     }
   }
-  return <div className="py-10 lg:py-14"><PageTitle eyebrow="build your library" title="เพิ่มคำศัพท์ให้เป็นของคุณ" description="วางรายการยาว ๆ จากหนังสือหรือโน้ตได้เลย ระบบจะอ่านเลขลำดับ, part of speech และคำแปลให้อัตโนมัติ" />{error && <p role="alert" className="mt-5 rounded-2xl border border-coral/30 bg-coral/10 p-4 text-sm text-ink">{error}</p>}<div className="mt-9 flex gap-2 rounded-2xl bg-ink/5 p-1.5 sm:w-fit"><button onClick={() => setTab("paste")} className={`rounded-xl px-4 py-2.5 text-sm font-bold transition ${tab === "paste" ? "bg-white text-ink shadow-sm" : "text-ink/45"}`}><Upload size={15} className="mr-2 inline" />วางรายการ</button><button onClick={() => setTab("manual")} className={`rounded-xl px-4 py-2.5 text-sm font-bold transition ${tab === "manual" ? "bg-white text-ink shadow-sm" : "text-ink/45"}`}><Plus size={15} className="mr-2 inline" />เพิ่มทีละคำ</button></div>{tab === "paste" ? <div className="mt-5 grid gap-5 lg:grid-cols-[1.15fr_.85fr]"><section className="rounded-[28px] border border-ink/10 bg-white p-5 shadow-card sm:p-7"><div className="flex items-center justify-between"><label className="text-sm font-bold">รายการคำศัพท์</label><button onClick={() => setText(sampleImport)} className="text-xs font-bold text-coral hover:underline">ใช้ตัวอย่าง</button></div><textarea value={text} onChange={(event) => setText(event.target.value)} placeholder={`airborne (adj.) - ทางอากาศ, ทหารพลร่ม\nlanding (n.) - การลงจอด`} className="mt-4 min-h-[340px] w-full resize-none rounded-2xl border border-ink/10 bg-cream p-4 text-sm leading-7 outline-none transition placeholder:text-ink/25 focus:border-coral focus:ring-4 focus:ring-coral/10" /><div className="mt-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><p className="text-xs leading-5 text-ink/40">รองรับเลขลำดับ, ไม่มีเลขลำดับ, tab-separated และ JSON</p><button disabled={!text.trim() || busy} onClick={() => void importText()} className="flex items-center justify-center gap-2 rounded-2xl bg-coral px-5 py-3 text-sm font-bold text-white transition hover:bg-coral/90 disabled:cursor-not-allowed disabled:opacity-40"><Import size={16} />{busy ? "กำลังนำเข้า…" : "นำเข้าคำศัพท์"}</button></div></section><section className="rounded-[28px] bg-ink p-6 text-white shadow-soft sm:p-8"><span className="grid h-11 w-11 place-items-center rounded-2xl bg-white/10 text-coral"><Sparkles size={19} /></span><h2 className="mt-8 font-display text-2xl font-bold">นำเข้าได้หลายแบบ</h2><div className="mt-7 space-y-5 text-sm leading-6 text-white/60"><div><p className="font-bold text-white">แบบมีเลขลำดับ</p><p>1. airborne (adj.) - ทางอากาศ</p></div><div><p className="font-bold text-white">แบบไม่มีเลขลำดับ</p><p>landing (n.) - การลงจอด</p></div><div><p className="font-bold text-white">แบบ JSON</p><p>[&#123; "term": "cover", "definition": "ที่กำบัง" &#125;]</p></div></div></section></div> : <section className="mt-5 max-w-2xl rounded-[28px] border border-ink/10 bg-white p-5 shadow-card sm:p-8"><div className="grid gap-5 sm:grid-cols-2"><Field label="คำศัพท์" value={manual.term} placeholder="e.g. cover" onChange={(value) => setManual({ ...manual, term: value })} /><Field label="ชนิดคำ" value={manual.partOfSpeech} placeholder="e.g. n. / v." onChange={(value) => setManual({ ...manual, partOfSpeech: value })} /></div><div className="mt-5"><Field label="คำแปล / ความหมาย" value={manual.definition} placeholder="ที่กำบัง, คุ้มกัน" onChange={(value) => setManual({ ...manual, definition: value })} multiline /></div><button disabled={!manual.term.trim() || !manual.definition.trim() || busy} onClick={() => void addManual()} className="mt-6 flex items-center gap-2 rounded-2xl bg-ink px-5 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"><Plus size={16} />เพิ่มเข้าคลัง</button></section>}</div>;
+  return <div className="py-10 lg:py-14"><PageTitle eyebrow="build your library" title="เพิ่มคำศัพท์ให้เป็นของคุณ" description="วางรายการยาว ๆ จากหนังสือหรือโน้ตได้เลย ระบบจะอ่านเลขลำดับ, part of speech และคำแปลให้อัตโนมัติ" />{error && <p role="alert" className="mt-5 rounded-2xl border border-coral/30 bg-coral/10 p-4 text-sm text-ink">{error}</p>}<div className="mt-9 flex gap-2 rounded-2xl bg-ink/5 p-1.5 sm:w-fit"><button onClick={() => setTab("paste")} className={`rounded-xl px-4 py-2.5 text-sm font-bold transition ${tab === "paste" ? "bg-white text-ink shadow-sm" : "text-ink/45"}`}><Upload size={15} className="mr-2 inline" />วางรายการ</button><button onClick={() => setTab("manual")} className={`rounded-xl px-4 py-2.5 text-sm font-bold transition ${tab === "manual" ? "bg-white text-ink shadow-sm" : "text-ink/45"}`}><Plus size={15} className="mr-2 inline" />เพิ่มทีละคำ</button></div>{tab === "paste" ? <div className="mt-5 grid gap-5 lg:grid-cols-[1.15fr_.85fr]"><section className="rounded-[28px] border border-ink/10 bg-white p-5 shadow-card sm:p-7"><div className="flex items-center justify-between"><label className="text-sm font-bold">รายการคำศัพท์</label><button onClick={() => setText(sampleImport)} className="text-xs font-bold text-coral hover:underline">ใช้ตัวอย่าง</button></div><div className="mt-4"><CategoryPicker categories={categories} value={categoryId} onChange={setCategoryId} onCreated={onCategoryCreated} /></div><textarea value={text} onChange={(event) => setText(event.target.value)} placeholder={`airborne (adj.) - ทางอากาศ, ทหารพลร่ม\nlanding (n.) - การลงจอด`} className="mt-4 min-h-[340px] w-full resize-none rounded-2xl border border-ink/10 bg-cream p-4 text-sm leading-7 outline-none transition placeholder:text-ink/25 focus:border-coral focus:ring-4 focus:ring-coral/10" /><div className="mt-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><p className="text-xs leading-5 text-ink/40">รองรับเลขลำดับ, ไม่มีเลขลำดับ, tab-separated และ JSON</p><button disabled={!text.trim() || busy} onClick={() => void importText()} className="flex items-center justify-center gap-2 rounded-2xl bg-coral px-5 py-3 text-sm font-bold text-white transition hover:bg-coral/90 disabled:cursor-not-allowed disabled:opacity-40"><Import size={16} />{busy ? "กำลังนำเข้า…" : "นำเข้าคำศัพท์"}</button></div></section><section className="rounded-[28px] bg-ink p-6 text-white shadow-soft sm:p-8"><span className="grid h-11 w-11 place-items-center rounded-2xl bg-white/10 text-coral"><Sparkles size={19} /></span><h2 className="mt-8 font-display text-2xl font-bold">นำเข้าได้หลายแบบ</h2><div className="mt-7 space-y-5 text-sm leading-6 text-white/60"><div><p className="font-bold text-white">แบบมีเลขลำดับ</p><p>1. airborne (adj.) - ทางอากาศ</p></div><div><p className="font-bold text-white">แบบไม่มีเลขลำดับ</p><p>landing (n.) - การลงจอด</p></div><div><p className="font-bold text-white">แบบ JSON</p><p>[&#123; "term": "cover", "definition": "ที่กำบัง" &#125;]</p></div></div></section></div> : <section className="mt-5 max-w-2xl rounded-[28px] border border-ink/10 bg-white p-5 shadow-card sm:p-8"><div className="grid gap-5 sm:grid-cols-2"><Field label="คำศัพท์" value={manual.term} placeholder="e.g. cover" onChange={(value) => setManual({ ...manual, term: value })} /><Field label="ชนิดคำ" value={manual.partOfSpeech} placeholder="e.g. n. / v." onChange={(value) => setManual({ ...manual, partOfSpeech: value })} /></div><div className="mt-5"><Field label="คำแปล / ความหมาย" value={manual.definition} placeholder="ที่กำบัง, คุ้มกัน" onChange={(value) => setManual({ ...manual, definition: value })} multiline /></div><div className="mt-5"><CategoryPicker categories={categories} value={categoryId} onChange={setCategoryId} onCreated={onCategoryCreated} /></div><button disabled={!manual.term.trim() || !manual.definition.trim() || busy} onClick={() => void addManual()} className="mt-6 flex items-center gap-2 rounded-2xl bg-ink px-5 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"><Plus size={16} />เพิ่มเข้าคลัง</button></section>}</div>;
 }
 
 function Field({ label, value, placeholder, onChange, multiline }: { label: string; value: string; placeholder: string; onChange: (value: string) => void; multiline?: boolean }) { const className = "mt-2 w-full rounded-2xl border border-ink/10 bg-cream px-4 py-3 text-sm outline-none transition placeholder:text-ink/25 focus:border-coral focus:ring-4 focus:ring-coral/10"; return <label className="block text-sm font-bold">{label}{multiline ? <textarea value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className={`${className} min-h-[130px] resize-none`} /> : <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className={className} />}</label>; }

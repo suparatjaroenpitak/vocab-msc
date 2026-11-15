@@ -10,6 +10,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   const { id } = await context.params;
   const userEmail = await getCurrentUserEmail();
+  if (!userEmail) return NextResponse.json({ error: "กรุณาเข้าสู่ระบบด้วย Google ก่อนทบทวน" }, { status: 401 });
   const db = getDb();
   const [word] = await db.select().from(words).where(and(eq(words.id, Number(id)), eq(words.user_email, userEmail)));
   if (!word) return NextResponse.json({ error: "ไม่พบคำศัพท์" }, { status: 404 });

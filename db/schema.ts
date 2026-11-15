@@ -1,11 +1,22 @@
 import { pgTable, serial, text, integer, doublePrecision, uniqueIndex, index } from "drizzle-orm/pg-core";
 
+export const categories = pgTable("categories", {
+  id: serial("id").primaryKey(),
+  user_email: text("user_email").notNull(),
+  name: text("name").notNull(),
+  created_at: text("created_at").notNull()
+}, (table) => [
+  uniqueIndex("categories_user_name_idx").on(table.user_email, table.name),
+  index("categories_user_idx").on(table.user_email)
+]);
+
 export const words = pgTable("words", {
   id: serial("id").primaryKey(),
   user_email: text("user_email").notNull(),
   term: text("term").notNull(),
   part_of_speech: text("part_of_speech").notNull().default(""),
   definition: text("definition").notNull(),
+  category_id: integer("category_id").references(() => categories.id, { onDelete: "set null" }),
   example: text("example"),
   interval_days: doublePrecision("interval_days").notNull().default(0),
   due_at: text("due_at").notNull(),
