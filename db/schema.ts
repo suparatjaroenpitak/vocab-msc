@@ -40,3 +40,12 @@ export const quizAttempts = pgTable("quiz_attempts", {
 }, (table) => [
   index("quiz_attempts_user_idx").on(table.user_email, table.created_at)
 ]);
+
+export const userSeedStates = pgTable("user_seed_states", {
+  id: serial("id").primaryKey(),
+  user_email: text("user_email").notNull(),
+  seed_key: text("seed_key").notNull(),
+  applied_at: text("applied_at").notNull()
+}, (table) => [
+  uniqueIndex("user_seed_states_user_seed_idx").on(table.user_email, table.seed_key)
+]);

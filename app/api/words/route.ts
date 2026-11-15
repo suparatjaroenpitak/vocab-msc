@@ -4,11 +4,13 @@ import { NextResponse } from "next/server";
 import { getCategoryIdForWord, ensureUserCategories } from "@/lib/categories";
 import { getCurrentUserEmail } from "@/lib/current-user";
 import { getDb } from "@/lib/db";
+import { ensureDefaultVocabulary } from "@/lib/default-vocabulary";
 
 export async function GET(request: Request) {
   const userEmail = await getCurrentUserEmail();
   if (!userEmail) return NextResponse.json({ error: "กรุณาเข้าสู่ระบบด้วย Google ก่อนใช้งาน" }, { status: 401 });
   const db = getDb();
+  await ensureDefaultVocabulary(db, userEmail);
   const { searchParams } = new URL(request.url);
   const mode = searchParams.get("mode") || "all";
   const includeDue = searchParams.get("includeDue") === "1";
