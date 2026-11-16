@@ -1,5 +1,5 @@
 import { categories as categoryTable, words as wordTable } from "@/db/schema";
-import { and, asc, desc, eq, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, lt, lte, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getCategoryIdForWord, ensureUserCategories } from "@/lib/categories";
 import { getCurrentUserEmail } from "@/lib/current-user";
@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   const requestedCategoryId = Number(searchParams.get("categoryId"));
   const queryWords = async (dueOnly: boolean) => {
     const filters = [eq(wordTable.user_email, userEmail)];
-    if (dueOnly) filters.push(lte(wordTable.due_at, new Date().toISOString()));
+    if (dueOnly) filters.push(lte(wordTable.due_at, new Date().toISOString()), lt(wordTable.correct_count, 7));
     if (dueOnly && Number.isInteger(requestedCategoryId) && requestedCategoryId > 0) filters.push(eq(wordTable.category_id, requestedCategoryId));
     const condition = filters.length === 1 ? filters[0] : and(...filters);
     const orderBy = dueOnly ? [asc(wordTable.due_at), desc(wordTable.id)] : [desc(wordTable.created_at), desc(wordTable.id)];
@@ -41,6 +41,7 @@ export async function GET(request: Request) {
     const words = await queryWords(false);
     const now = Date.now();
     const dueWordIds = words
+      .filter((word) => word.correct_count < 7)
       .filter((word) => new Date(word.due_at).getTime() <= now)
       .filter((word) => !Number.isInteger(requestedCategoryId) || requestedCategoryId <= 0 || word.category_id === requestedCategoryId)
       .sort((left, right) => left.due_at.localeCompare(right.due_at) || right.id - left.id)

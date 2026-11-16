@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { signIn, signOut, useSession } from "next-auth/react";
 import {
   ArrowRight,
+  Brain,
   BookOpen,
   Check,
   ChevronRight,
@@ -34,7 +35,7 @@ import { parseVocabulary } from "@/lib/parser";
 import type { Category, LeaderboardSnapshot, ReviewRating, Word } from "@/lib/types";
 import { PWAInstallButton } from "@/components/pwa-register";
 
-type Tab = "dashboard" | "review" | "quiz" | "fill" | "import" | "leaderboard";
+type Tab = "dashboard" | "review" | "quiz" | "fill" | "import" | "leaderboard" | "mastered";
 
 const sampleImport = `1. airborne (adj.) - ทางอากาศ, ทหารพลร่ม
 2. landing (n.) - การลงจอด, การยกพลขึ้นบก
@@ -61,7 +62,7 @@ const LEGACY_WORD_CACHE_PREFIX = "lexiflow:words:";
 function selectDueWords(words: Word[]) {
   const now = Date.now();
   return words
-    .filter((word) => new Date(word.due_at).getTime() <= now)
+    .filter((word) => word.correct_count < 7 && new Date(word.due_at).getTime() <= now)
     .sort((left, right) => left.due_at.localeCompare(right.due_at) || right.id - left.id);
 }
 
@@ -276,8 +277,9 @@ export default function HomePage() {
   }, [toast]);
 
   const reviewedToday = useMemo(() => words.filter((word) => word.last_reviewed?.slice(0, 10) === new Date().toISOString().slice(0, 10)).length, [words]);
-  const mastered = useMemo(() => words.filter((word) => word.interval_days >= 7).length, [words]);
-  const learningWords = useMemo(() => learningCategoryId ? words.filter((word) => word.category_id === learningCategoryId) : words, [learningCategoryId, words]);
+  const masteredWords = useMemo(() => words.filter((word) => word.correct_count >= 7), [words]);
+  const mastered = masteredWords.length;
+  const learningWords = useMemo(() => words.filter((word) => word.correct_count < 7 && (!learningCategoryId || word.category_id === learningCategoryId)), [learningCategoryId, words]);
   const scopedDueWords = useMemo(() => learningCategoryId ? dueWords.filter((word) => word.category_id === learningCategoryId) : dueWords, [dueWords, learningCategoryId]);
 
   function navigate(tab: Tab) {
@@ -303,17 +305,37 @@ export default function HomePage() {
     setWords(nextWords);
     setDueWords(nextDueWords);
     if (learnerKey) saveWordCache(learnerKey, nextWords);
-    setToast(rating === "known" ? "เก็บคำนี้เข้าความจำระยะยาวแล้ว" : "บันทึกไว้ทบทวนอีกครั้งใน 10 นาที");
+    setToast(updated.correctCount >= 7 ? "จำคำนี้ได้แม่นแล้ว! ย้ายไปอยู่ในส่วนจำแม่น" : rating === "known" ? `จำได้แล้ว · สะสม ${updated.correctCount}/7 ครั้ง` : "บันทึกไว้ทบทวนอีกครั้งใน 10 นาที");
   }
 
-  async function saveQuizAttempt(score: number, totalQuestions: number) {
-    const result = await requestJson<LeaderboardSnapshot>("/api/leaderboard", {
+  async function recordCorrectWords(wordIds: number[]) {
+    const uniqueIds = Array.from(new Set(wordIds));
+    if (!uniqueIds.length) return;
+    const result = await requestJson<{ updated: Array<{ id: number; correct_count: number }> }>("/api/words/progress", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ score, totalQuestions })
+      body: JSON.stringify({ wordIds: uniqueIds })
     });
-    setLeaderboard(result);
-    return result;
+    const counts = new Map(result.updated.map((word) => [word.id, word.correct_count]));
+    const nextWords = words.map((word) => counts.has(word.id) ? { ...word, correct_count: counts.get(word.id)! } : word);
+    setWords(nextWords);
+    setDueWords(selectDueWords(nextWords));
+    if (learnerKey) saveWordCache(learnerKey, nextWords);
+  }
+
+  async function saveQuizAttempt(score: number, totalQuestions: number, correctWordIds: number[]) {
+    const [boardResult, progressResult] = await Promise.allSettled([
+      requestJson<LeaderboardSnapshot>("/api/leaderboard", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ score, totalQuestions })
+      }),
+      recordCorrectWords(correctWordIds)
+    ]);
+    if (progressResult.status === "rejected") setToast("บันทึกคะแนนควิซแล้ว แต่บันทึกความจำคำศัพท์ไม่สำเร็จ");
+    if (boardResult.status === "rejected") throw boardResult.reason;
+    setLeaderboard(boardResult.value);
+    return boardResult.value;
   }
 
   if (status === "loading") return <AuthGate loading />;
@@ -335,6 +357,7 @@ export default function HomePage() {
           <nav className="mt-3 space-y-1">
             <NavItem active={activeTab === "dashboard"} icon={<LayoutDashboard size={18} />} label="ภาพรวม" onClick={() => navigate("dashboard")} />
             <NavItem active={activeTab === "review"} icon={<RotateCcw size={18} />} label="ทบทวนวันนี้" badge={dueWords.length} onClick={() => navigate("review")} />
+            <NavItem active={activeTab === "mastered"} icon={<Brain size={18} />} label="จำแม่น" badge={mastered} onClick={() => navigate("mastered")} />
             <NavItem active={activeTab === "quiz"} icon={<CircleHelp size={18} />} label="ควิซคำศัพท์" onClick={() => navigate("quiz")} />
             <NavItem active={activeTab === "leaderboard"} icon={<Trophy size={18} />} label="สถิติและอันดับ" onClick={() => navigate("leaderboard")} />
             <NavItem active={activeTab === "fill"} icon={<GraduationCap size={18} />} label="เติมคำจากคำแปล" onClick={() => navigate("fill")} />
@@ -357,7 +380,7 @@ export default function HomePage() {
         <section className="min-w-0 flex-1 px-5 py-5 sm:px-8 lg:px-12 lg:py-8">
           <header className="flex items-center justify-between gap-4">
             <button className="rounded-xl border border-ink/10 bg-white/70 p-2.5 lg:hidden" onClick={() => setSidebarOpen(true)} aria-label="เปิดเมนู"><Menu size={19} /></button>
-            <div className="hidden items-center gap-2 text-sm text-ink/40 sm:flex"><span className="h-2 w-2 rounded-full bg-emerald-400" /> ระบบพร้อมใช้งาน <span className="text-ink/20">/</span> {activeTab === "dashboard" ? "ภาพรวม" : activeTab === "review" ? "ทบทวน" : activeTab === "quiz" ? "ควิซ" : activeTab === "fill" ? "เติมคำ" : activeTab === "leaderboard" ? "สถิติและอันดับ" : "นำเข้า"}</div>
+            <div className="hidden items-center gap-2 text-sm text-ink/40 sm:flex"><span className="h-2 w-2 rounded-full bg-emerald-400" /> ระบบพร้อมใช้งาน <span className="text-ink/20">/</span> {activeTab === "dashboard" ? "ภาพรวม" : activeTab === "review" ? "ทบทวน" : activeTab === "quiz" ? "ควิซ" : activeTab === "fill" ? "เติมคำ" : activeTab === "leaderboard" ? "สถิติและอันดับ" : activeTab === "mastered" ? "จำแม่น" : "นำเข้า"}</div>
             <div className="ml-auto flex items-center gap-3">
               <div className="hidden text-right sm:block"><p className="text-xs font-semibold text-ink/40">{session?.user?.email ? "บัญชีของคุณ" : "โหมดทดลอง"}</p><p className="text-sm font-bold">{session?.user?.name || "Guest learner"}</p></div>
               <div className="grid h-10 w-10 place-items-center rounded-2xl bg-coral/15 font-bold text-coral">{session?.user?.name?.slice(0, 1).toUpperCase() || "G"}</div>
@@ -371,8 +394,9 @@ export default function HomePage() {
             {activeTab === "dashboard" && <Dashboard words={words} dueWords={dueWords} mastered={mastered} reviewedToday={reviewedToday} loading={loading} onNavigate={navigate} />}
             {activeTab === "review" && <ReviewView words={scopedDueWords} loading={loading} onReview={reviewWord} onNavigate={navigate} />}
             {activeTab === "quiz" && <QuizView words={learningWords} onComplete={saveQuizAttempt} />}
+            {activeTab === "mastered" && <MasteredView words={masteredWords} loading={loading} />}
             {activeTab === "leaderboard" && <LeaderboardView data={leaderboard} loading={leaderboardLoading} error={leaderboardError} onRetry={() => void loadLeaderboard()} />}
-            {activeTab === "fill" && <FillView words={learningWords} onToast={setToast} />}
+            {activeTab === "fill" && <FillView words={learningWords} onCorrect={recordCorrectWords} onToast={setToast} />}
             {activeTab === "import" && <ImportView categories={categories} onCategoryCreated={(category) => setCategories((current) => [...current, category])} onDone={async (message) => { setToast(message); const [, categoryResponse] = await Promise.all([learnerKey ? loadWords(learnerKey) : Promise.resolve(), fetch("/api/categories")]); setCategories((await categoryResponse.json()) as Category[]); navigate("dashboard"); }} />}
           </div>
         </section>
@@ -393,7 +417,8 @@ function LearningScope({ categories, value, onChange }: { categories: Category[]
 function Dashboard({ words, dueWords, mastered, reviewedToday, loading, onNavigate }: { words: Word[]; dueWords: Word[]; mastered: number; reviewedToday: number; loading: boolean; onNavigate: (tab: Tab) => void }) {
   return <div className="py-10 lg:py-14">
     <div className="flex flex-col justify-between gap-6 sm:flex-row sm:items-end"><div><p className="mb-3 flex items-center gap-2 text-sm font-bold text-coral"><span className="h-2 w-2 rounded-full bg-coral" /> {getGreeting()}, นักเรียน</p><h1 className="font-display text-4xl font-bold tracking-[-0.04em] text-ink sm:text-5xl">พร้อมเรียนรู้คำใหม่<br /><span className="text-ink/35">ทีละคำไหม?</span></h1><p className="mt-5 max-w-md text-sm leading-7 text-ink/55">ทบทวนให้ถูกจังหวะ แล้วคำศัพท์จะย้ายจากความจำสั้นไปอยู่ในคลังระยะยาว</p></div><button onClick={() => onNavigate(dueWords.length ? "review" : "import")} className="group flex w-fit items-center gap-3 rounded-2xl bg-coral px-5 py-3.5 text-sm font-bold text-white shadow-lg shadow-coral/20 transition hover:-translate-y-0.5">{dueWords.length ? "เริ่มทบทวน" : "เพิ่มคำศัพท์แรก"}<ArrowRight size={17} className="transition group-hover:translate-x-1" /></button></div>
-    <div className="mt-12 grid grid-cols-2 gap-3 sm:grid-cols-4"><StatCard icon={<BookOpen size={18} />} label="คำศัพท์ทั้งหมด" value={loading ? "—" : words.length} tone="lilac" /><StatCard icon={<Clock3 size={18} />} label="ถึงเวลาทบทวน" value={loading ? "—" : dueWords.length} tone="sand" /><StatCard icon={<Trophy size={18} />} label="จำได้ดีแล้ว" value={loading ? "—" : mastered} tone="mint" /><StatCard icon={<Flame size={18} />} label="ทบทวนวันนี้" value={reviewedToday} tone="coral" /></div>
+    <div className="mt-12 grid grid-cols-2 gap-3 sm:grid-cols-4"><StatCard icon={<BookOpen size={18} />} label="คำศัพท์ทั้งหมด" value={loading ? "—" : words.length} tone="lilac" /><StatCard icon={<Clock3 size={18} />} label="ถึงเวลาทบทวน" value={loading ? "—" : dueWords.length} tone="sand" /><StatCard icon={<Brain size={18} />} label="จำแม่น · ถูก 7 ครั้งขึ้นไป" value={loading ? "—" : mastered} tone="mint" /><StatCard icon={<Flame size={18} />} label="ทบทวนวันนี้" value={reviewedToday} tone="coral" /></div>
+    <button onClick={() => onNavigate("mastered")} className="mt-4 flex items-center gap-2 text-sm font-bold text-emerald-700 transition hover:text-coral"><Brain size={16} /> ดูคลังคำศัพท์ที่จำแม่นแล้ว <ArrowRight size={15} /></button>
     <div className="mt-8 grid gap-5 xl:grid-cols-[1.15fr_.85fr]">
       <section className="grid-paper overflow-hidden rounded-[28px] border border-ink/10 bg-white p-6 shadow-card sm:p-8"><div className="flex items-start justify-between"><div><span className="mb-4 inline-flex items-center gap-2 rounded-full bg-coral/10 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-coral"><Zap size={13} /> Focus session</span><h2 className="font-display text-2xl font-bold">วันนี้มี {dueWords.length} คำรอคุณอยู่</h2><p className="mt-2 max-w-sm text-sm leading-6 text-ink/50">เซสชันสั้น ๆ 5 นาที ช่วยให้จำได้แม่นกว่าการอ่านซ้ำยาว ๆ</p></div><div className="hidden h-16 w-16 place-items-center rounded-full border-[7px] border-coral/15 border-t-coral text-sm font-bold text-coral sm:grid">{Math.min(Math.round((reviewedToday / Math.max(words.length, 1)) * 100), 100)}%</div></div><div className="mt-8 flex items-center gap-3">{dueWords.slice(0, 3).map((word, index) => <div key={word.id} className={`flex h-14 w-14 -rotate-${index % 2 ? "2" : "1"} items-center justify-center rounded-2xl border border-ink/10 bg-white text-[10px] font-bold shadow-sm ${index === 1 ? "-translate-y-2" : ""}`}>{word.term.slice(0, 9)}{word.term.length > 9 ? "…" : ""}</div>)}{!dueWords.length && <div className="flex h-14 items-center gap-3 rounded-2xl bg-mint/70 px-4 text-sm font-semibold text-ink/70"><Check size={17} /> เยี่ยม! วันนี้เคลียร์หมดแล้ว</div>}<button onClick={() => onNavigate("review")} className="ml-auto hidden items-center gap-2 text-sm font-bold text-ink/55 transition hover:text-coral sm:flex">ดูทั้งหมด <ChevronRight size={16} /></button></div></section>
       <section className="rounded-[28px] bg-ink p-6 text-white shadow-soft sm:p-8"><div className="flex items-center justify-between"><div><p className="text-sm font-semibold text-white/45">Your learning rhythm</p><h2 className="mt-1 font-display text-2xl font-bold">รักษาจังหวะไว้</h2></div><span className="grid h-11 w-11 place-items-center rounded-2xl bg-white/10 text-coral"><Heart size={19} fill="currentColor" /></span></div><div className="mt-10 flex items-end gap-2">{[35, 55, 42, 75, 62, reviewedToday ? 88 : 28, 12].map((height, index) => <div key={index} className="flex flex-1 flex-col items-center gap-2"><div className={`w-full rounded-t-lg ${index === 5 ? "bg-coral" : "bg-white/15"}`} style={{ height: `${height}px` }} /><span className="text-[10px] text-white/30">{["จ", "อ", "พ", "พฤ", "ศ", "ส", "อา"][index]}</span></div>)}</div><div className="mt-7 flex items-center gap-3 border-t border-white/10 pt-5"><span className="text-3xl font-bold">{reviewedToday}</span><span className="text-sm leading-5 text-white/45">คำที่ทบทวนวันนี้<br />เป้าหมาย 10 คำ</span></div></section>
@@ -405,6 +430,13 @@ function Dashboard({ words, dueWords, mastered, reviewedToday, loading, onNaviga
 function StatCard({ icon, label, value, tone }: { icon: React.ReactNode; label: string; value: string | number; tone: "lilac" | "sand" | "mint" | "coral" }) {
   const tones = { lilac: "bg-lilac", sand: "bg-sand", mint: "bg-mint", coral: "bg-coral/10" };
   return <div className="rounded-2xl border border-ink/8 bg-white p-4 shadow-card sm:p-5"><span className={`grid h-9 w-9 place-items-center rounded-xl ${tones[tone]} text-ink`}>{icon}</span><p className="mt-5 text-xs font-semibold text-ink/45">{label}</p><p className="mt-1 font-display text-3xl font-bold tracking-tight">{value}</p></div>;
+}
+
+function MasteredView({ words, loading }: { words: Word[]; loading: boolean }) {
+  return <div className="py-10 lg:py-14"><PageTitle eyebrow="mastered vocabulary" title="คลังคำศัพท์ที่จำแม่น" description="คำจะย้ายมาที่นี่เมื่อคุณตอบถูกในควิซ เติมคำ หรือกด ‘จำได้แล้ว’ ในโหมดทบทวน รวมอย่างน้อย 7 ครั้ง" />
+    <div className="mt-7 flex items-center gap-3 rounded-2xl border border-emerald-200 bg-mint px-5 py-4"><Brain className="shrink-0 text-emerald-700" size={20} /><p className="text-sm font-semibold text-emerald-900">จำแม่นแล้ว {words.length} คำ · คำในคลังนี้จะไม่ถูกรวมในชุดฝึกปกติ</p></div>
+    <section className="mt-6 overflow-hidden rounded-[28px] border border-ink/10 bg-white shadow-card"><div className="divide-y divide-ink/8">{loading ? <p className="p-8 text-center text-sm text-ink/45">กำลังโหลดคำศัพท์…</p> : words.map((word) => <article key={word.id} className="flex flex-wrap items-center gap-3 px-5 py-4 sm:px-7"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-mint font-bold text-emerald-800">{word.term.slice(0, 1).toUpperCase()}</div><div className="min-w-0 flex-1"><p className="break-words font-bold">{word.term} <span className="ml-1 text-xs font-medium text-ink/35">{word.part_of_speech}</span></p><p className="mt-1 text-sm text-ink/55">{word.definition}</p>{word.category_name && <p className="mt-1 text-xs text-ink/35">{word.category_name}</p>}</div><span className="rounded-full bg-mint px-3 py-1.5 text-xs font-bold text-emerald-800">ถูก {word.correct_count} ครั้ง</span><div className="flex gap-1"><VoiceButton text={word.term} lang="en-US" label="ฟังคำศัพท์ภาษาอังกฤษ" /><VoiceButton text={word.definition} lang="th-TH" label="ฟังคำแปลภาษาไทย" /></div></article>)}{!loading && !words.length && <div className="p-10 text-center"><Brain className="mx-auto text-ink/20" size={30} /><p className="mt-4 font-bold">ยังไม่มีคำศัพท์ในคลังจำแม่น</p><p className="mt-2 text-sm text-ink/45">ฝึกคำศัพท์จากโหมดทบทวน ควิซ หรือเติมคำ เมื่อสะสมคำตอบถูกครบ 7 ครั้ง คำนั้นจะมาอยู่ที่นี่</p></div>}</div></section>
+  </div>;
 }
 
 function ReviewView({ words, loading, onReview, onNavigate }: { words: Word[]; loading: boolean; onReview: (id: number, rating: ReviewRating) => Promise<void>; onNavigate: (tab: Tab) => void }) {
@@ -420,9 +452,10 @@ function ReviewView({ words, loading, onReview, onNavigate }: { words: Word[]; l
 
 function PageTitle({ eyebrow, title, description }: { eyebrow: string; title: string; description?: string }) { return <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-coral">{eyebrow}</p><h1 className="mt-3 font-display text-4xl font-bold tracking-[-0.04em] sm:text-5xl">{title}</h1>{description && <p className="mt-4 max-w-lg text-sm leading-7 text-ink/50">{description}</p>}</div>; }
 
-function QuizView({ words, onComplete }: { words: Word[]; onComplete: (score: number, totalQuestions: number) => Promise<LeaderboardSnapshot> }) {
+function QuizView({ words, onComplete }: { words: Word[]; onComplete: (score: number, totalQuestions: number, correctWordIds: number[]) => Promise<LeaderboardSnapshot> }) {
   const [questionIndex, setQuestionIndex] = useState(0);
   const [score, setScore] = useState(0);
+  const [correctWordIds, setCorrectWordIds] = useState<number[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -434,6 +467,7 @@ function QuizView({ words, onComplete }: { words: Word[]; onComplete: (score: nu
     setResult(null);
     setQuestionIndex(0);
     setScore(0);
+    setCorrectWordIds([]);
     setSelected(null);
     setStarted(true);
   }
@@ -441,7 +475,11 @@ function QuizView({ words, onComplete }: { words: Word[]; onComplete: (score: nu
     if (selected || !current) return;
     setSelected(term);
     const correct = term === current.term;
-    if (correct) setScore((value) => value + 1);
+    const nextCorrectWordIds = correct ? [...correctWordIds, current.id] : correctWordIds;
+    if (correct) {
+      setScore((value) => value + 1);
+      setCorrectWordIds(nextCorrectWordIds);
+    }
     window.setTimeout(() => {
       if (questionIndex + 1 >= quizWords.length) {
         const finalScore = score + (correct ? 1 : 0);
@@ -451,7 +489,7 @@ function QuizView({ words, onComplete }: { words: Word[]; onComplete: (score: nu
         setScore(0);
         setResult({ score: finalScore, total: quizWords.length, rank: null, bestPercent: null, saved: false });
         setSaving(true);
-        void onComplete(finalScore, quizWords.length).then((snapshot) => {
+        void onComplete(finalScore, quizWords.length, nextCorrectWordIds).then((snapshot) => {
           setResult({ score: finalScore, total: quizWords.length, rank: snapshot.me?.rank ?? null, bestPercent: snapshot.me?.bestPercent ?? null, saved: true });
         }).catch(() => {
           setResult({ score: finalScore, total: quizWords.length, rank: null, bestPercent: null, saved: false });
@@ -484,11 +522,14 @@ function LeaderboardView({ data, loading, error, onRetry }: { data: LeaderboardS
   </div>;
 }
 
-function FillView({ words, onToast }: { words: Word[]; onToast: (message: string) => void }) {
+function FillView({ words, onCorrect, onToast }: { words: Word[]; onCorrect: (wordIds: number[]) => Promise<void>; onToast: (message: string) => void }) {
   const [pool, setPool] = useState<Word[]>([]);
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<"correct" | "wrong" | null>(null);
+  const wordsRef = useRef(words);
+  wordsRef.current = words;
+  const wordIdsKey = words.map((word) => word.id).join(",");
   const current = pool[index];
   const parts = useMemo(() => {
     if (!current) return [];
@@ -502,11 +543,11 @@ function FillView({ words, onToast }: { words: Word[]; onToast: (message: string
   const answer = selected.map((id) => parts.find((part) => part.id === id)?.text || "").join("");
 
   useEffect(() => {
-    setPool([...words].sort(() => Math.random() - 0.5));
+    setPool([...wordsRef.current].sort(() => Math.random() - 0.5));
     setIndex(0);
     setSelected([]);
     setFeedback(null);
-  }, [words]);
+  }, [wordIdsKey]);
 
   function choosePart(id: string) {
     if (feedback || selected.includes(id)) return;
@@ -518,7 +559,7 @@ function FillView({ words, onToast }: { words: Word[]; onToast: (message: string
     const normalize = (value: string) => value.toLowerCase().replace(/\s/g, "");
     const correct = normalize(answer) === normalize(current.term);
     setFeedback(correct ? "correct" : "wrong");
-    if (correct) onToast("ตอบถูก! เก่งมาก");
+    if (correct) void onCorrect([current.id]).then(() => onToast("ตอบถูก! บันทึกความจำแล้ว")).catch(() => onToast("ตอบถูก แต่บันทึกความจำไม่สำเร็จ ลองอีกครั้ง"));
   }
 
   function nextQuestion() {
