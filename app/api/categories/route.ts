@@ -4,12 +4,14 @@ import { NextResponse } from "next/server";
 import { ensureUserCategories } from "@/lib/categories";
 import { getCurrentUserEmail } from "@/lib/current-user";
 import { getDb } from "@/lib/db";
+import { ensureDefaultVocabulary } from "@/lib/default-vocabulary";
 
 export async function GET() {
   const userEmail = await getCurrentUserEmail();
   if (!userEmail) return NextResponse.json({ error: "กรุณาเข้าสู่ระบบด้วย Google ก่อนใช้งาน" }, { status: 401 });
   const db = getDb();
   await ensureUserCategories(db, userEmail);
+  await ensureDefaultVocabulary(db, userEmail);
   const result = await db.select({
     id: categories.id,
     name: categories.name,
