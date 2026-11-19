@@ -5,6 +5,7 @@ import { signIn, signOut, useSession } from "next-auth/react";
 import {
   ArrowRight,
   Brain,
+  BookMarked,
   BookOpen,
   Check,
   ChevronRight,
@@ -34,8 +35,9 @@ import { requestJson } from "@/lib/request-json";
 import { parseVocabulary } from "@/lib/parser";
 import type { Category, LeaderboardSnapshot, ReviewRating, Word } from "@/lib/types";
 import { PWAInstallButton } from "@/components/pwa-register";
+import { PREFIX_GROUPS, PREFIX_WORD_COUNT } from "@/lib/prefix-vocabulary";
 
-type Tab = "dashboard" | "review" | "quiz" | "fill" | "import" | "leaderboard" | "mastered";
+type Tab = "dashboard" | "review" | "quiz" | "fill" | "import" | "leaderboard" | "mastered" | "roots";
 
 const sampleImport = `1. airborne (adj.) - ทางอากาศ, ทหารพลร่ม
 2. landing (n.) - การลงจอด, การยกพลขึ้นบก
@@ -358,6 +360,7 @@ export default function HomePage() {
             <NavItem active={activeTab === "dashboard"} icon={<LayoutDashboard size={18} />} label="ภาพรวม" onClick={() => navigate("dashboard")} />
             <NavItem active={activeTab === "review"} icon={<RotateCcw size={18} />} label="ทบทวนวันนี้" badge={dueWords.length} onClick={() => navigate("review")} />
             <NavItem active={activeTab === "mastered"} icon={<Brain size={18} />} label="จำแม่น" badge={mastered} onClick={() => navigate("mastered")} />
+            <NavItem active={activeTab === "roots"} icon={<BookMarked size={18} />} label="เรียนรู้รากศัพท์" onClick={() => navigate("roots")} />
             <NavItem active={activeTab === "quiz"} icon={<CircleHelp size={18} />} label="ควิซคำศัพท์" onClick={() => navigate("quiz")} />
             <NavItem active={activeTab === "leaderboard"} icon={<Trophy size={18} />} label="สถิติและอันดับ" onClick={() => navigate("leaderboard")} />
             <NavItem active={activeTab === "fill"} icon={<GraduationCap size={18} />} label="เติมคำจากคำแปล" onClick={() => navigate("fill")} />
@@ -380,7 +383,7 @@ export default function HomePage() {
         <section className="min-w-0 flex-1 px-5 py-5 sm:px-8 lg:px-12 lg:py-8">
           <header className="flex items-center justify-between gap-4">
             <button className="rounded-xl border border-ink/10 bg-white/70 p-2.5 lg:hidden" onClick={() => setSidebarOpen(true)} aria-label="เปิดเมนู"><Menu size={19} /></button>
-            <div className="hidden items-center gap-2 text-sm text-ink/40 sm:flex"><span className="h-2 w-2 rounded-full bg-emerald-400" /> ระบบพร้อมใช้งาน <span className="text-ink/20">/</span> {activeTab === "dashboard" ? "ภาพรวม" : activeTab === "review" ? "ทบทวน" : activeTab === "quiz" ? "ควิซ" : activeTab === "fill" ? "เติมคำ" : activeTab === "leaderboard" ? "สถิติและอันดับ" : activeTab === "mastered" ? "จำแม่น" : "นำเข้า"}</div>
+            <div className="hidden items-center gap-2 text-sm text-ink/40 sm:flex"><span className="h-2 w-2 rounded-full bg-emerald-400" /> ระบบพร้อมใช้งาน <span className="text-ink/20">/</span> {activeTab === "dashboard" ? "ภาพรวม" : activeTab === "review" ? "ทบทวน" : activeTab === "quiz" ? "ควิซ" : activeTab === "fill" ? "เติมคำ" : activeTab === "leaderboard" ? "สถิติและอันดับ" : activeTab === "mastered" ? "จำแม่น" : activeTab === "roots" ? "เรียนรู้รากศัพท์" : "นำเข้า"}</div>
             <div className="ml-auto flex items-center gap-3">
               <div className="hidden text-right sm:block"><p className="text-xs font-semibold text-ink/40">{session?.user?.email ? "บัญชีของคุณ" : "โหมดทดลอง"}</p><p className="text-sm font-bold">{session?.user?.name || "Guest learner"}</p></div>
               <div className="grid h-10 w-10 place-items-center rounded-2xl bg-coral/15 font-bold text-coral">{session?.user?.name?.slice(0, 1).toUpperCase() || "G"}</div>
@@ -395,6 +398,7 @@ export default function HomePage() {
             {activeTab === "review" && <ReviewView words={scopedDueWords} loading={loading} onReview={reviewWord} onNavigate={navigate} />}
             {activeTab === "quiz" && <QuizView words={learningWords} onComplete={saveQuizAttempt} />}
             {activeTab === "mastered" && <MasteredView words={masteredWords} loading={loading} />}
+            {activeTab === "roots" && <RootLearningView />}
             {activeTab === "leaderboard" && <LeaderboardView data={leaderboard} loading={leaderboardLoading} error={leaderboardError} onRetry={() => void loadLeaderboard()} />}
             {activeTab === "fill" && <FillView words={learningWords} onCorrect={recordCorrectWords} onToast={setToast} />}
             {activeTab === "import" && <ImportView categories={categories} onCategoryCreated={(category) => setCategories((current) => [...current, category])} onDone={async (message) => { setToast(message); const [, categoryResponse] = await Promise.all([learnerKey ? loadWords(learnerKey) : Promise.resolve(), fetch("/api/categories")]); setCategories((await categoryResponse.json()) as Category[]); navigate("dashboard"); }} />}
@@ -436,6 +440,49 @@ function MasteredView({ words, loading }: { words: Word[]; loading: boolean }) {
   return <div className="py-10 lg:py-14"><PageTitle eyebrow="mastered vocabulary" title="คลังคำศัพท์ที่จำแม่น" description="คำจะย้ายมาที่นี่เมื่อคุณตอบถูกในควิซ เติมคำ หรือกด ‘จำได้แล้ว’ ในโหมดทบทวน รวมอย่างน้อย 7 ครั้ง" />
     <div className="mt-7 flex items-center gap-3 rounded-2xl border border-emerald-200 bg-mint px-5 py-4"><Brain className="shrink-0 text-emerald-700" size={20} /><p className="text-sm font-semibold text-emerald-900">จำแม่นแล้ว {words.length} คำ · คำในคลังนี้จะไม่ถูกรวมในชุดฝึกปกติ</p></div>
     <section className="mt-6 overflow-hidden rounded-[28px] border border-ink/10 bg-white shadow-card"><div className="divide-y divide-ink/8">{loading ? <p className="p-8 text-center text-sm text-ink/45">กำลังโหลดคำศัพท์…</p> : words.map((word) => <article key={word.id} className="flex flex-wrap items-center gap-3 px-5 py-4 sm:px-7"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-mint font-bold text-emerald-800">{word.term.slice(0, 1).toUpperCase()}</div><div className="min-w-0 flex-1"><p className="break-words font-bold">{word.term} <span className="ml-1 text-xs font-medium text-ink/35">{word.part_of_speech}</span></p><p className="mt-1 text-sm text-ink/55">{word.definition}</p>{word.category_name && <p className="mt-1 text-xs text-ink/35">{word.category_name}</p>}</div><span className="rounded-full bg-mint px-3 py-1.5 text-xs font-bold text-emerald-800">ถูก {word.correct_count} ครั้ง</span><div className="flex gap-1"><VoiceButton text={word.term} lang="en-US" label="ฟังคำศัพท์ภาษาอังกฤษ" /><VoiceButton text={word.definition} lang="th-TH" label="ฟังคำแปลภาษาไทย" /></div></article>)}{!loading && !words.length && <div className="p-10 text-center"><Brain className="mx-auto text-ink/20" size={30} /><p className="mt-4 font-bold">ยังไม่มีคำศัพท์ในคลังจำแม่น</p><p className="mt-2 text-sm text-ink/45">ฝึกคำศัพท์จากโหมดทบทวน ควิซ หรือเติมคำ เมื่อสะสมคำตอบถูกครบ 7 ครั้ง คำนั้นจะมาอยู่ที่นี่</p></div>}</div></section>
+  </div>;
+}
+
+function RootLearningView() {
+  const [groupIndex, setGroupIndex] = useState(0);
+  const [exampleIndex, setExampleIndex] = useState(0);
+  const [showMeaning, setShowMeaning] = useState(false);
+  const group = PREFIX_GROUPS[groupIndex];
+  const example = group.examples[exampleIndex];
+
+  function chooseGroup(index: number) {
+    setGroupIndex(index);
+    setExampleIndex(0);
+    setShowMeaning(false);
+  }
+
+  function chooseExample(index: number) {
+    setExampleIndex(index);
+    setShowMeaning(false);
+  }
+
+  function nextExample() {
+    chooseExample((exampleIndex + 1) % group.examples.length);
+  }
+
+  function randomExample() {
+    const nextGroupIndex = Math.floor(Math.random() * PREFIX_GROUPS.length);
+    const nextGroup = PREFIX_GROUPS[nextGroupIndex];
+    chooseGroup(nextGroupIndex);
+    setExampleIndex(Math.floor(Math.random() * nextGroup.examples.length));
+    setShowMeaning(false);
+  }
+
+  if (!group || !example) return null;
+  return <div className="py-10 lg:py-14"><PageTitle eyebrow="prefix roots · ก.พ. & TOEIC" title="เรียนรู้รากศัพท์จาก Prefix" description={`จำความหมายของคำอุปสรรค แล้วใช้เดาคำศัพท์ใหม่จากส่วนหน้าของคำได้ง่ายขึ้น · ${PREFIX_GROUPS.length} กลุ่ม ${PREFIX_WORD_COUNT} คำ`} />
+    <div className="mt-7 flex flex-wrap items-center gap-3 rounded-2xl border border-ink/10 bg-white px-5 py-4 shadow-card"><BookMarked className="text-coral" size={20} /><p className="text-sm font-semibold text-ink/70">Prefix คือส่วนที่เติมหน้าคำศัพท์ เช่น <strong>re-</strong> แปลว่า “อีกครั้ง” ดังนั้น <strong>rewrite</strong> คือ “เขียนใหม่”</p></div>
+    <div className="mt-7 grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
+      <aside className="rounded-[28px] border border-ink/10 bg-white p-4 shadow-card"><div className="flex items-center justify-between px-2"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-coral">20 groups</p><h2 className="mt-1 font-display text-xl font-bold">เลือก Prefix</h2></div><span className="rounded-full bg-lilac px-2.5 py-1 text-xs font-bold">{groupIndex + 1}/20</span></div><div className="mt-4 max-h-[560px] space-y-1 overflow-y-auto pr-1">{PREFIX_GROUPS.map((item, index) => <button key={item.prefix} onClick={() => chooseGroup(index)} className={`w-full rounded-2xl px-3 py-3 text-left transition ${index === groupIndex ? "bg-ink text-white shadow-card" : "text-ink/60 hover:bg-ink/5 hover:text-ink"}`}><span className="block font-bold">{item.prefix}</span><span className={`mt-1 block text-xs ${index === groupIndex ? "text-white/55" : "text-ink/40"}`}>{item.meaning}</span></button>)}</div></aside>
+      <section className="min-w-0 rounded-[28px] border border-ink/10 bg-white p-5 shadow-card sm:p-7"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-coral">group {groupIndex + 1} · {group.examples.length} examples</p><h2 className="mt-2 font-display text-4xl font-bold">{group.prefix}</h2><p className="mt-2 text-sm font-semibold text-ink/50">ความหมาย: {group.meaning}</p></div><button onClick={randomExample} className="flex w-fit items-center gap-2 rounded-xl border border-ink/10 px-3 py-2 text-xs font-bold text-ink/60 transition hover:border-coral/40 hover:text-coral"><Sparkles size={14} /> สุ่มคำ</button></div>
+        <div className="mt-7 rounded-[26px] bg-ink p-6 text-white sm:p-9"><div className="flex items-center justify-between"><span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-bold text-white/60">ตัวอย่างที่ {exampleIndex + 1} / {group.examples.length}</span><VoiceButton text={example[0]} lang="en-US" label="ฟังคำศัพท์ภาษาอังกฤษ" /></div><p className="mt-8 text-xs font-bold uppercase tracking-[0.16em] text-white/40">คำที่มี Prefix นี้</p><h3 className="mt-3 break-words font-display text-4xl font-bold tracking-[-0.04em] sm:text-5xl">{example[0]}</h3><div className="mt-7 min-h-16 rounded-2xl bg-white/10 px-5 py-4">{showMeaning ? <p className="text-lg font-semibold">{example[1]}</p> : <button onClick={() => setShowMeaning(true)} className="text-sm font-bold text-white/65 transition hover:text-white">กดเพื่อดูคำแปลภาษาไทย <span className="ml-1 text-white/35">space</span></button>}</div><div className="mt-7 flex flex-wrap gap-2"><button onClick={() => setShowMeaning((value) => !value)} className="rounded-xl bg-white px-4 py-2.5 text-xs font-bold text-ink">{showMeaning ? "ซ่อนคำแปล" : "แสดงคำแปล"}</button><button onClick={nextExample} className="flex items-center gap-2 rounded-xl bg-coral px-4 py-2.5 text-xs font-bold text-white">คำถัดไป <ArrowRight size={14} /></button></div></div>
+        <div className="mt-6"><p className="text-xs font-bold uppercase tracking-[0.16em] text-ink/35">คำศัพท์ในกลุ่ม {group.prefix}</p><div className="mt-3 grid gap-2 sm:grid-cols-2">{group.examples.map((item, index) => <button key={item[0]} onClick={() => chooseExample(index)} className={`flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left transition ${index === exampleIndex ? "border-coral bg-coral/5" : "border-ink/8 hover:border-coral/40"}`}><span className="min-w-0"><span className="block truncate text-sm font-bold">{item[0]}</span><span className="mt-1 block truncate text-xs text-ink/45">{item[1]}</span></span><span className="shrink-0 text-xs font-bold text-ink/25">{index + 1}</span></button>)}</div></div>
+      </section>
+    </div>
   </div>;
 }
 
