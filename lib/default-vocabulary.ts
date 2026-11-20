@@ -2,6 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { categories, userSeedStates, words } from "@/db/schema";
 import type { getDb } from "@/lib/db";
 import { GOVERNMENT_EXAM_VOCABULARY } from "@/lib/government-exam-vocabulary";
+import { GAME_VOCABULARY } from "@/lib/game-vocabulary";
 
 type Db = ReturnType<typeof getDb>;
 
@@ -11,6 +12,8 @@ export const DEFAULT_VOCABULARY_SEED_KEY = "toeic-business-500-v1";
 export const DEFAULT_VOCABULARY_CATEGORY = "TOEIC";
 export const GOVERNMENT_EXAM_VOCABULARY_SEED_KEY = "government-exam-pasted-533-v1";
 export const GOVERNMENT_EXAM_VOCABULARY_CATEGORY = "คำศัพท์ กพ";
+export const GAME_VOCABULARY_SEED_KEY = "game-vocabulary-images-v1";
+export const GAME_VOCABULARY_CATEGORY = "คำศัพท์จากเกม";
 
 // Each row is: source number, term, part of speech, Thai definition.
 const vocabularyRows = `
@@ -575,23 +578,62 @@ export async function ensureDefaultVocabulary(db: Db, userEmail: string) {
       eq(userSeedStates.user_email, userEmail),
       eq(userSeedStates.seed_key, GOVERNMENT_EXAM_VOCABULARY_SEED_KEY)
     )).limit(1);
-    if (governmentSeedState) return;
+    if (!governmentSeedState) {
+      await tx.insert(categories).values({ user_email: userEmail, name: GOVERNMENT_EXAM_VOCABULARY_CATEGORY, created_at: now })
+        .onConflictDoNothing({ target: [categories.user_email, categories.name] });
+      const [governmentCategory] = await tx.select({ id: categories.id }).from(categories).where(and(
+        eq(categories.user_email, userEmail),
+        eq(categories.name, GOVERNMENT_EXAM_VOCABULARY_CATEGORY)
+      )).limit(1);
+      if (!governmentCategory) throw new Error("Unable to create the government exam vocabulary category");
 
-    await tx.insert(categories).values({ user_email: userEmail, name: GOVERNMENT_EXAM_VOCABULARY_CATEGORY, created_at: now })
-      .onConflictDoNothing({ target: [categories.user_email, categories.name] });
-    const [governmentCategory] = await tx.select({ id: categories.id }).from(categories).where(and(
-      eq(categories.user_email, userEmail),
-      eq(categories.name, GOVERNMENT_EXAM_VOCABULARY_CATEGORY)
+      await tx.insert(words).values(GOVERNMENT_EXAM_VOCABULARY.map(({ term, part_of_speech, definition }) => ({
+        user_email: userEmail,
+        term,
+        part_of_speech,
+        definition,
+        category_id: governmentCategory.id,
+        example: null,
+        interval_days: 0,
+        due_at: now,
+        review_count: 0,
+        correct_count: 0,
+        last_reviewed: null,
+        created_at: now,
+        updated_at: now
+      }))).onConflictDoUpdate({
+        target: [words.user_email, words.term],
+        set: { category_id: sql`excluded.category_id`, updated_at: now }
+      });
+
+      await tx.insert(userSeedStates).values({
+        user_email: userEmail,
+        seed_key: GOVERNMENT_EXAM_VOCABULARY_SEED_KEY,
+        applied_at: now
+      }).onConflictDoNothing({ target: [userSeedStates.user_email, userSeedStates.seed_key] });
+    }
+
+    const [gameSeedState] = await tx.select({ id: userSeedStates.id }).from(userSeedStates).where(and(
+      eq(userSeedStates.user_email, userEmail),
+      eq(userSeedStates.seed_key, GAME_VOCABULARY_SEED_KEY)
     )).limit(1);
-    if (!governmentCategory) throw new Error("Unable to create the government exam vocabulary category");
+    if (gameSeedState) return;
 
-    await tx.insert(words).values(GOVERNMENT_EXAM_VOCABULARY.map(({ term, part_of_speech, definition }) => ({
+    await tx.insert(categories).values({ user_email: userEmail, name: GAME_VOCABULARY_CATEGORY, created_at: now })
+      .onConflictDoNothing({ target: [categories.user_email, categories.name] });
+    const [gameCategory] = await tx.select({ id: categories.id }).from(categories).where(and(
+      eq(categories.user_email, userEmail),
+      eq(categories.name, GAME_VOCABULARY_CATEGORY)
+    )).limit(1);
+    if (!gameCategory) throw new Error("Unable to create the game vocabulary category");
+
+    await tx.insert(words).values(GAME_VOCABULARY.map(({ term, part_of_speech, definition, example }) => ({
       user_email: userEmail,
       term,
       part_of_speech,
       definition,
-      category_id: governmentCategory.id,
-      example: null,
+      category_id: gameCategory.id,
+      example,
       interval_days: 0,
       due_at: now,
       review_count: 0,
@@ -601,12 +643,12 @@ export async function ensureDefaultVocabulary(db: Db, userEmail: string) {
       updated_at: now
     }))).onConflictDoUpdate({
       target: [words.user_email, words.term],
-      set: { category_id: sql`excluded.category_id`, updated_at: now }
+      set: { category_id: sql`excluded.category_id`, example: sql`coalesce(${words.example}, excluded.example)`, updated_at: now }
     });
 
     await tx.insert(userSeedStates).values({
       user_email: userEmail,
-      seed_key: GOVERNMENT_EXAM_VOCABULARY_SEED_KEY,
+      seed_key: GAME_VOCABULARY_SEED_KEY,
       applied_at: now
     }).onConflictDoNothing({ target: [userSeedStates.user_email, userSeedStates.seed_key] });
   });
