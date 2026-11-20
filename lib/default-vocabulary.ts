@@ -3,6 +3,7 @@ import { categories, userSeedStates, words } from "@/db/schema";
 import type { getDb } from "@/lib/db";
 import { GOVERNMENT_EXAM_VOCABULARY } from "@/lib/government-exam-vocabulary";
 import { GAME_VOCABULARY } from "@/lib/game-vocabulary";
+import { GAME_VOCABULARY_PASTED } from "@/lib/game-vocabulary-pasted";
 
 type Db = ReturnType<typeof getDb>;
 
@@ -12,8 +13,12 @@ export const DEFAULT_VOCABULARY_SEED_KEY = "toeic-business-500-v1";
 export const DEFAULT_VOCABULARY_CATEGORY = "TOEIC";
 export const GOVERNMENT_EXAM_VOCABULARY_SEED_KEY = "government-exam-pasted-533-v1";
 export const GOVERNMENT_EXAM_VOCABULARY_CATEGORY = "คำศัพท์ กพ";
-export const GAME_VOCABULARY_SEED_KEY = "game-vocabulary-images-v1";
+export const GAME_VOCABULARY_SEED_KEY = "game-vocabulary-images-and-pasted-500-v2";
 export const GAME_VOCABULARY_CATEGORY = "คำศัพท์จากเกม";
+
+const ALL_GAME_VOCABULARY = Array.from(new Map(
+  [...GAME_VOCABULARY, ...GAME_VOCABULARY_PASTED].map((word) => [word.term, word])
+).values());
 
 // Each row is: source number, term, part of speech, Thai definition.
 const vocabularyRows = `
@@ -627,7 +632,7 @@ export async function ensureDefaultVocabulary(db: Db, userEmail: string) {
     )).limit(1);
     if (!gameCategory) throw new Error("Unable to create the game vocabulary category");
 
-    await tx.insert(words).values(GAME_VOCABULARY.map(({ term, part_of_speech, definition, example }) => ({
+    await tx.insert(words).values(ALL_GAME_VOCABULARY.map(({ term, part_of_speech, definition, example }) => ({
       user_email: userEmail,
       term,
       part_of_speech,
