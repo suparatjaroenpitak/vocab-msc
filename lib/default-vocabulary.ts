@@ -1,10 +1,7 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, not, or, sql } from "drizzle-orm";
 import { categories, userSeedStates, words } from "@/db/schema";
 import type { getDb } from "@/lib/db";
 import { GOVERNMENT_EXAM_VOCABULARY } from "@/lib/government-exam-vocabulary";
-import { GAME_VOCABULARY } from "@/lib/game-vocabulary";
-import { GAME_VOCABULARY_PASTED } from "@/lib/game-vocabulary-pasted";
-import { PASTED_VOCABULARY } from "@/lib/pasted-vocabulary";
 
 type Db = ReturnType<typeof getDb>;
 
@@ -14,18 +11,9 @@ export const DEFAULT_VOCABULARY_SEED_KEY = "toeic-business-500-v1";
 export const DEFAULT_VOCABULARY_CATEGORY = "TOEIC";
 export const GOVERNMENT_EXAM_VOCABULARY_SEED_KEY = "government-exam-pasted-533-v1";
 export const GOVERNMENT_EXAM_VOCABULARY_CATEGORY = "คำศัพท์ กพ";
-export const GAME_VOCABULARY_SEED_KEY = "game-vocabulary-images-and-pasted-500-v2";
-export const GAME_VOCABULARY_CATEGORY = "คำศัพท์จากเกม";
-export const PASTED_VOCABULARY_SEED_KEY = "pasted-vocabulary-by-category-1050-v1";
+export const VOCABULARY_CLEANUP_SEED_KEY = "keep-toeic-government-only-v1";
 
-const PASTED_VOCABULARY_CATEGORIES = ["ทางการ", "สแลง", "โซเชียล", "เกม"] as const;
-const UNIQUE_PASTED_VOCABULARY = Array.from(new Map(
-  PASTED_VOCABULARY.map((word) => [word.term, word])
-).values());
-
-const ALL_GAME_VOCABULARY = Array.from(new Map(
-  [...GAME_VOCABULARY, ...GAME_VOCABULARY_PASTED].map((word) => [word.term, word])
-).values());
+const ALLOWED_VOCABULARY_CATEGORIES = [DEFAULT_VOCABULARY_CATEGORY, GOVERNMENT_EXAM_VOCABULARY_CATEGORY] as const;
 
 // Each row is: source number, term, part of speech, Thai definition.
 const vocabularyRows = `
@@ -625,86 +613,36 @@ export async function ensureDefaultVocabulary(db: Db, userEmail: string) {
       }).onConflictDoNothing({ target: [userSeedStates.user_email, userSeedStates.seed_key] });
     }
 
-    const [pastedVocabularySeedState] = await tx.select({ id: userSeedStates.id }).from(userSeedStates).where(and(
+    const [cleanupSeedState] = await tx.select({ id: userSeedStates.id }).from(userSeedStates).where(and(
       eq(userSeedStates.user_email, userEmail),
-      eq(userSeedStates.seed_key, PASTED_VOCABULARY_SEED_KEY)
+      eq(userSeedStates.seed_key, VOCABULARY_CLEANUP_SEED_KEY)
     )).limit(1);
-    if (!pastedVocabularySeedState) {
-      for (const categoryName of PASTED_VOCABULARY_CATEGORIES) {
-        const categoryWords = UNIQUE_PASTED_VOCABULARY.filter((word) => word.category === categoryName);
+    if (!cleanupSeedState) {
+      for (const categoryName of ALLOWED_VOCABULARY_CATEGORIES) {
         await tx.insert(categories).values({ user_email: userEmail, name: categoryName, created_at: now })
           .onConflictDoNothing({ target: [categories.user_email, categories.name] });
-        const [category] = await tx.select({ id: categories.id }).from(categories).where(and(
-          eq(categories.user_email, userEmail),
-          eq(categories.name, categoryName)
-        )).limit(1);
-        if (!category) throw new Error(`Unable to create the ${categoryName} vocabulary category`);
-
-        await tx.insert(words).values(categoryWords.map(({ term, part_of_speech, definition }) => ({
-          user_email: userEmail,
-          term,
-          part_of_speech,
-          definition,
-          category_id: category.id,
-          example: null,
-          interval_days: 0,
-          due_at: now,
-          review_count: 0,
-          correct_count: 0,
-          last_reviewed: null,
-          created_at: now,
-          updated_at: now
-        }))).onConflictDoUpdate({
-          target: [words.user_email, words.term],
-          set: { category_id: sql`excluded.category_id`, updated_at: now }
-        });
       }
+      const allowedCategories = await tx.select({ id: categories.id }).from(categories).where(and(
+        eq(categories.user_email, userEmail),
+        inArray(categories.name, ALLOWED_VOCABULARY_CATEGORIES)
+      ));
+      const allowedCategoryIds = allowedCategories.map(({ id }) => id);
+      if (!allowedCategoryIds.length) throw new Error("Unable to find the allowed vocabulary categories");
 
+      await tx.delete(words).where(and(
+        eq(words.user_email, userEmail),
+        or(isNull(words.category_id), not(inArray(words.category_id, allowedCategoryIds)))
+      ));
+      await tx.delete(categories).where(and(
+        eq(categories.user_email, userEmail),
+        not(inArray(categories.name, ALLOWED_VOCABULARY_CATEGORIES))
+      ));
       await tx.insert(userSeedStates).values({
         user_email: userEmail,
-        seed_key: PASTED_VOCABULARY_SEED_KEY,
+        seed_key: VOCABULARY_CLEANUP_SEED_KEY,
         applied_at: now
       }).onConflictDoNothing({ target: [userSeedStates.user_email, userSeedStates.seed_key] });
     }
-
-    const [gameSeedState] = await tx.select({ id: userSeedStates.id }).from(userSeedStates).where(and(
-      eq(userSeedStates.user_email, userEmail),
-      eq(userSeedStates.seed_key, GAME_VOCABULARY_SEED_KEY)
-    )).limit(1);
-    if (gameSeedState) return;
-
-    await tx.insert(categories).values({ user_email: userEmail, name: GAME_VOCABULARY_CATEGORY, created_at: now })
-      .onConflictDoNothing({ target: [categories.user_email, categories.name] });
-    const [gameCategory] = await tx.select({ id: categories.id }).from(categories).where(and(
-      eq(categories.user_email, userEmail),
-      eq(categories.name, GAME_VOCABULARY_CATEGORY)
-    )).limit(1);
-    if (!gameCategory) throw new Error("Unable to create the game vocabulary category");
-
-    await tx.insert(words).values(ALL_GAME_VOCABULARY.map(({ term, part_of_speech, definition, example }) => ({
-      user_email: userEmail,
-      term,
-      part_of_speech,
-      definition,
-      category_id: gameCategory.id,
-      example,
-      interval_days: 0,
-      due_at: now,
-      review_count: 0,
-      correct_count: 0,
-      last_reviewed: null,
-      created_at: now,
-      updated_at: now
-    }))).onConflictDoUpdate({
-      target: [words.user_email, words.term],
-      set: { category_id: sql`excluded.category_id`, example: sql`coalesce(${words.example}, excluded.example)`, updated_at: now }
-    });
-
-    await tx.insert(userSeedStates).values({
-      user_email: userEmail,
-      seed_key: GAME_VOCABULARY_SEED_KEY,
-      applied_at: now
-    }).onConflictDoNothing({ target: [userSeedStates.user_email, userSeedStates.seed_key] });
   });
 
   seededUsers.set(userEmail, seedOperation);

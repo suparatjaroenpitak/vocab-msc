@@ -4,8 +4,6 @@ import type { getDb } from "@/lib/db";
 
 type Db = ReturnType<typeof getDb>;
 
-export const SUGGESTED_CATEGORIES = ["การทหาร", "กีฬา", "สถานที่และการเดินทาง", "วลีและสำนวน", "ทั่วไป"];
-
 export function suggestCategoryName(term: string, partOfSpeech: string, definition: string) {
   const text = `${term} ${partOfSpeech} ${definition}`.toLowerCase();
   if (/phr\.?\s*v|phrase|idiom|pipe down|spread out|set up|clear out|dropping in|taking aim/.test(text)) return "วลีและสำนวน";
@@ -17,8 +15,6 @@ export function suggestCategoryName(term: string, partOfSpeech: string, definiti
 
 export async function ensureUserCategories(db: Db, userEmail: string) {
   const now = new Date().toISOString();
-  await db.insert(categories).values(SUGGESTED_CATEGORIES.map((name) => ({ user_email: userEmail, name, created_at: now }))).onConflictDoNothing({ target: [categories.user_email, categories.name] });
-
   const categoryRows = await db.select({ id: categories.id, name: categories.name }).from(categories).where(eq(categories.user_email, userEmail));
   const byName = new Map(categoryRows.map((category) => [category.name, category.id]));
   const uncategorized = await db.select({ id: words.id, term: words.term, part_of_speech: words.part_of_speech, definition: words.definition }).from(words).where(and(eq(words.user_email, userEmail), isNull(words.category_id)));
