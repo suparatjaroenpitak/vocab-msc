@@ -2,6 +2,7 @@ import { and, eq, inArray, isNull, not, or, sql } from "drizzle-orm";
 import { categories, userSeedStates, words } from "@/db/schema";
 import type { getDb } from "@/lib/db";
 import { GOVERNMENT_EXAM_VOCABULARY } from "@/lib/government-exam-vocabulary";
+import { SENTENCE_PATTERN_VOCABULARY } from "@/lib/sentence-pattern-vocabulary";
 
 type Db = ReturnType<typeof getDb>;
 
@@ -12,8 +13,14 @@ export const DEFAULT_VOCABULARY_CATEGORY = "TOEIC";
 export const GOVERNMENT_EXAM_VOCABULARY_SEED_KEY = "government-exam-pasted-533-v1";
 export const GOVERNMENT_EXAM_VOCABULARY_CATEGORY = "คำศัพท์ กพ";
 export const VOCABULARY_CLEANUP_SEED_KEY = "keep-toeic-government-only-v1";
+export const SENTENCE_PATTERN_VOCABULARY_SEED_KEY = "sentence-pattern-997-v1";
+export const SENTENCE_PATTERN_VOCABULARY_CATEGORY = "pattle กลุ่มประโยค";
 
-const ALLOWED_VOCABULARY_CATEGORIES = [DEFAULT_VOCABULARY_CATEGORY, GOVERNMENT_EXAM_VOCABULARY_CATEGORY] as const;
+const ALLOWED_VOCABULARY_CATEGORIES = [
+  DEFAULT_VOCABULARY_CATEGORY,
+  GOVERNMENT_EXAM_VOCABULARY_CATEGORY,
+  SENTENCE_PATTERN_VOCABULARY_CATEGORY
+] as const;
 
 // Each row is: source number, term, part of speech, Thai definition.
 const vocabularyRows = `
@@ -640,6 +647,45 @@ export async function ensureDefaultVocabulary(db: Db, userEmail: string) {
       await tx.insert(userSeedStates).values({
         user_email: userEmail,
         seed_key: VOCABULARY_CLEANUP_SEED_KEY,
+        applied_at: now
+      }).onConflictDoNothing({ target: [userSeedStates.user_email, userSeedStates.seed_key] });
+    }
+
+    const [sentencePatternSeedState] = await tx.select({ id: userSeedStates.id }).from(userSeedStates).where(and(
+      eq(userSeedStates.user_email, userEmail),
+      eq(userSeedStates.seed_key, SENTENCE_PATTERN_VOCABULARY_SEED_KEY)
+    )).limit(1);
+    if (!sentencePatternSeedState) {
+      await tx.insert(categories).values({ user_email: userEmail, name: SENTENCE_PATTERN_VOCABULARY_CATEGORY, created_at: now })
+        .onConflictDoNothing({ target: [categories.user_email, categories.name] });
+      const [sentencePatternCategory] = await tx.select({ id: categories.id }).from(categories).where(and(
+        eq(categories.user_email, userEmail),
+        eq(categories.name, SENTENCE_PATTERN_VOCABULARY_CATEGORY)
+      )).limit(1);
+      if (!sentencePatternCategory) throw new Error("Unable to create the sentence pattern vocabulary category");
+
+      await tx.insert(words).values(SENTENCE_PATTERN_VOCABULARY.map(({ term, part_of_speech, definition }) => ({
+        user_email: userEmail,
+        term,
+        part_of_speech,
+        definition,
+        category_id: sentencePatternCategory.id,
+        example: null,
+        interval_days: 0,
+        due_at: now,
+        review_count: 0,
+        correct_count: 0,
+        last_reviewed: null,
+        created_at: now,
+        updated_at: now
+      }))).onConflictDoUpdate({
+        target: [words.user_email, words.term],
+        set: { category_id: sql`excluded.category_id`, updated_at: now }
+      });
+
+      await tx.insert(userSeedStates).values({
+        user_email: userEmail,
+        seed_key: SENTENCE_PATTERN_VOCABULARY_SEED_KEY,
         applied_at: now
       }).onConflictDoNothing({ target: [userSeedStates.user_email, userSeedStates.seed_key] });
     }
