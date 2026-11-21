@@ -3,6 +3,7 @@ import { categories, userSeedStates, words } from "@/db/schema";
 import type { getDb } from "@/lib/db";
 import { GOVERNMENT_EXAM_VOCABULARY } from "@/lib/government-exam-vocabulary";
 import { SENTENCE_PATTERN_VOCABULARY } from "@/lib/sentence-pattern-vocabulary";
+import { TOEIC_PASTED_VOCABULARY } from "@/lib/toeic-pasted-vocabulary";
 
 type Db = ReturnType<typeof getDb>;
 
@@ -10,6 +11,7 @@ const seededUsers = new Map<string, Promise<void>>();
 
 export const DEFAULT_VOCABULARY_SEED_KEY = "toeic-business-500-v1";
 export const DEFAULT_VOCABULARY_CATEGORY = "TOEIC";
+export const TOEIC_PASTED_VOCABULARY_SEED_KEY = "toeic-pasted-500-v2";
 export const GOVERNMENT_EXAM_VOCABULARY_SEED_KEY = "government-exam-pasted-533-v1";
 export const GOVERNMENT_EXAM_VOCABULARY_CATEGORY = "คำศัพท์ กพ";
 export const VOCABULARY_CLEANUP_SEED_KEY = "keep-toeic-government-only-v1";
@@ -577,6 +579,50 @@ export async function ensureDefaultVocabulary(db: Db, userEmail: string) {
       await tx.insert(userSeedStates).values({
         user_email: userEmail,
         seed_key: DEFAULT_VOCABULARY_SEED_KEY,
+        applied_at: now
+      }).onConflictDoNothing({ target: [userSeedStates.user_email, userSeedStates.seed_key] });
+    }
+
+    const [toeicPastedSeedState] = await tx.select({ id: userSeedStates.id }).from(userSeedStates).where(and(
+      eq(userSeedStates.user_email, userEmail),
+      eq(userSeedStates.seed_key, TOEIC_PASTED_VOCABULARY_SEED_KEY)
+    )).limit(1);
+    if (!toeicPastedSeedState) {
+      await tx.insert(categories).values({ user_email: userEmail, name: DEFAULT_VOCABULARY_CATEGORY, created_at: now })
+        .onConflictDoNothing({ target: [categories.user_email, categories.name] });
+      const [toeicCategory] = await tx.select({ id: categories.id }).from(categories).where(and(
+        eq(categories.user_email, userEmail),
+        eq(categories.name, DEFAULT_VOCABULARY_CATEGORY)
+      )).limit(1);
+      if (!toeicCategory) throw new Error("Unable to create the TOEIC vocabulary category");
+
+      await tx.insert(words).values(TOEIC_PASTED_VOCABULARY.map(({ term, part_of_speech, definition }) => ({
+        user_email: userEmail,
+        term,
+        part_of_speech,
+        definition,
+        category_id: toeicCategory.id,
+        example: null,
+        interval_days: 0,
+        due_at: now,
+        review_count: 0,
+        correct_count: 0,
+        last_reviewed: null,
+        created_at: now,
+        updated_at: now
+      }))).onConflictDoUpdate({
+        target: [words.user_email, words.term],
+        set: {
+          part_of_speech: sql`excluded.part_of_speech`,
+          definition: sql`excluded.definition`,
+          category_id: sql`coalesce(${words.category_id}, excluded.category_id)`,
+          updated_at: now
+        }
+      });
+
+      await tx.insert(userSeedStates).values({
+        user_email: userEmail,
+        seed_key: TOEIC_PASTED_VOCABULARY_SEED_KEY,
         applied_at: now
       }).onConflictDoNothing({ target: [userSeedStates.user_email, userSeedStates.seed_key] });
     }
