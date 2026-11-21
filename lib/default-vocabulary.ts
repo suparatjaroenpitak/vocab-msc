@@ -4,6 +4,7 @@ import type { getDb } from "@/lib/db";
 import { GOVERNMENT_EXAM_VOCABULARY } from "@/lib/government-exam-vocabulary";
 import { GAME_VOCABULARY } from "@/lib/game-vocabulary";
 import { GAME_VOCABULARY_PASTED } from "@/lib/game-vocabulary-pasted";
+import { PASTED_VOCABULARY } from "@/lib/pasted-vocabulary";
 
 type Db = ReturnType<typeof getDb>;
 
@@ -15,6 +16,12 @@ export const GOVERNMENT_EXAM_VOCABULARY_SEED_KEY = "government-exam-pasted-533-v
 export const GOVERNMENT_EXAM_VOCABULARY_CATEGORY = "คำศัพท์ กพ";
 export const GAME_VOCABULARY_SEED_KEY = "game-vocabulary-images-and-pasted-500-v2";
 export const GAME_VOCABULARY_CATEGORY = "คำศัพท์จากเกม";
+export const PASTED_VOCABULARY_SEED_KEY = "pasted-vocabulary-by-category-1050-v1";
+
+const PASTED_VOCABULARY_CATEGORIES = ["ทางการ", "สแลง", "โซเชียล", "เกม"] as const;
+const UNIQUE_PASTED_VOCABULARY = Array.from(new Map(
+  PASTED_VOCABULARY.map((word) => [word.term, word])
+).values());
 
 const ALL_GAME_VOCABULARY = Array.from(new Map(
   [...GAME_VOCABULARY, ...GAME_VOCABULARY_PASTED].map((word) => [word.term, word])
@@ -614,6 +621,48 @@ export async function ensureDefaultVocabulary(db: Db, userEmail: string) {
       await tx.insert(userSeedStates).values({
         user_email: userEmail,
         seed_key: GOVERNMENT_EXAM_VOCABULARY_SEED_KEY,
+        applied_at: now
+      }).onConflictDoNothing({ target: [userSeedStates.user_email, userSeedStates.seed_key] });
+    }
+
+    const [pastedVocabularySeedState] = await tx.select({ id: userSeedStates.id }).from(userSeedStates).where(and(
+      eq(userSeedStates.user_email, userEmail),
+      eq(userSeedStates.seed_key, PASTED_VOCABULARY_SEED_KEY)
+    )).limit(1);
+    if (!pastedVocabularySeedState) {
+      for (const categoryName of PASTED_VOCABULARY_CATEGORIES) {
+        const categoryWords = UNIQUE_PASTED_VOCABULARY.filter((word) => word.category === categoryName);
+        await tx.insert(categories).values({ user_email: userEmail, name: categoryName, created_at: now })
+          .onConflictDoNothing({ target: [categories.user_email, categories.name] });
+        const [category] = await tx.select({ id: categories.id }).from(categories).where(and(
+          eq(categories.user_email, userEmail),
+          eq(categories.name, categoryName)
+        )).limit(1);
+        if (!category) throw new Error(`Unable to create the ${categoryName} vocabulary category`);
+
+        await tx.insert(words).values(categoryWords.map(({ term, part_of_speech, definition }) => ({
+          user_email: userEmail,
+          term,
+          part_of_speech,
+          definition,
+          category_id: category.id,
+          example: null,
+          interval_days: 0,
+          due_at: now,
+          review_count: 0,
+          correct_count: 0,
+          last_reviewed: null,
+          created_at: now,
+          updated_at: now
+        }))).onConflictDoUpdate({
+          target: [words.user_email, words.term],
+          set: { category_id: sql`excluded.category_id`, updated_at: now }
+        });
+      }
+
+      await tx.insert(userSeedStates).values({
+        user_email: userEmail,
+        seed_key: PASTED_VOCABULARY_SEED_KEY,
         applied_at: now
       }).onConflictDoNothing({ target: [userSeedStates.user_email, userSeedStates.seed_key] });
     }
