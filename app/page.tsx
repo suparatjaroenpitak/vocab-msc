@@ -37,9 +37,10 @@ import type { Category, LeaderboardSnapshot, ReviewRating, Word } from "@/lib/ty
 import { PWAInstallButton } from "@/components/pwa-register";
 import { PREFIX_GROUPS, PREFIX_WORD_COUNT } from "@/lib/prefix-vocabulary";
 import { PatternLearningView } from "@/components/pattern-learning";
+import { VocabularyLearningView } from "@/components/vocabulary-learning";
 import { isSentencePattern, SENTENCE_PATTERN_CATEGORY } from "@/lib/pattern-learning";
 
-type Tab = "dashboard" | "review" | "quiz" | "fill" | "import" | "leaderboard" | "mastered" | "roots" | "patterns";
+type Tab = "dashboard" | "review" | "vocabularyLearning" | "quiz" | "fill" | "import" | "leaderboard" | "mastered" | "roots" | "patterns";
 
 const sampleImport = `1. airborne (adj.) - ทางอากาศ, ทหารพลร่ม
 2. landing (n.) - การลงจอด, การยกพลขึ้นบก
@@ -184,11 +185,13 @@ async function speakText(text: string, lang: string) {
   const voices = await loadSpeechVoices();
   if (requestId !== speechRequestId) return;
 
-  const languageCode = lang.split("-")[0].toLowerCase();
-  const voice = voices.find((item) => item.lang.toLowerCase() === lang.toLowerCase())
+  const speechLanguage = detectSpeechLanguage(text, lang === "th-TH" ? "th-TH" : "en-US");
+  const detectedLocale = speechLanguage.locale;
+  const languageCode = detectedLocale.split("-")[0].toLowerCase();
+  const voice = voices.find((item) => item.lang.toLowerCase() === detectedLocale.toLowerCase())
     ?? voices.find((item) => item.lang.toLowerCase().startsWith(`${languageCode}-`));
   const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = voice?.lang || lang;
+  utterance.lang = voice?.lang || detectedLocale;
   utterance.rate = languageCode === "th" ? 0.9 : 0.85;
   if (voice) utterance.voice = voice;
   synthesis.speak(utterance);
@@ -371,6 +374,7 @@ export default function HomePage() {
           <nav className="mt-3 space-y-1">
             <NavItem active={activeTab === "dashboard"} icon={<LayoutDashboard size={18} />} label="ภาพรวม" onClick={() => navigate("dashboard")} />
             <NavItem active={activeTab === "review"} icon={<RotateCcw size={18} />} label="ทบทวนวันนี้" badge={vocabularyDueWords.length} onClick={() => navigate("review")} />
+            <NavItem active={activeTab === "vocabularyLearning"} icon={<BookOpen size={18} />} label="เรียนรู้คำศัพท์ที่ถึงรอบ" badge={vocabularyDueWords.length} onClick={() => navigate("vocabularyLearning")} />
             <NavItem active={activeTab === "mastered"} icon={<Brain size={18} />} label="จำแม่น" badge={mastered} onClick={() => navigate("mastered")} />
             <NavItem active={activeTab === "roots"} icon={<BookMarked size={18} />} label="เรียนรู้รากศัพท์" onClick={() => navigate("roots")} />
             <NavItem active={activeTab === "patterns"} icon={<BookOpen size={18} />} label="ฝึกกลุ่มประโยค" onClick={() => navigate("patterns")} />
@@ -396,7 +400,7 @@ export default function HomePage() {
         <section className="min-w-0 flex-1 px-5 py-5 sm:px-8 lg:px-12 lg:py-8">
           <header className="flex items-center justify-between gap-4">
             <button className="rounded-xl border border-ink/10 bg-white/70 p-2.5 lg:hidden" onClick={() => setSidebarOpen(true)} aria-label="เปิดเมนู"><Menu size={19} /></button>
-            <div className="hidden items-center gap-2 text-sm text-ink/40 sm:flex"><span className="h-2 w-2 rounded-full bg-emerald-400" /> ระบบพร้อมใช้งาน <span className="text-ink/20">/</span> {activeTab === "dashboard" ? "ภาพรวม" : activeTab === "review" ? "ทบทวน" : activeTab === "quiz" ? "ควิซ" : activeTab === "fill" ? "เติมคำ" : activeTab === "leaderboard" ? "สถิติและอันดับ" : activeTab === "mastered" ? "จำแม่น" : activeTab === "roots" ? "เรียนรู้รากศัพท์" : activeTab === "patterns" ? "ฝึกกลุ่มประโยค" : "นำเข้า"}</div>
+            <div className="hidden items-center gap-2 text-sm text-ink/40 sm:flex"><span className="h-2 w-2 rounded-full bg-emerald-400" /> ระบบพร้อมใช้งาน <span className="text-ink/20">/</span> {activeTab === "dashboard" ? "ภาพรวม" : activeTab === "review" ? "ทบทวน" : activeTab === "vocabularyLearning" ? "เรียนรู้คำศัพท์ที่ถึงรอบ" : activeTab === "quiz" ? "ควิซ" : activeTab === "fill" ? "เติมคำ" : activeTab === "leaderboard" ? "สถิติและอันดับ" : activeTab === "mastered" ? "จำแม่น" : activeTab === "roots" ? "เรียนรู้รากศัพท์" : activeTab === "patterns" ? "ฝึกกลุ่มประโยค" : "นำเข้า"}</div>
             <div className="ml-auto flex items-center gap-3">
               <div className="hidden text-right sm:block"><p className="text-xs font-semibold text-ink/40">{session?.user?.email ? "บัญชีของคุณ" : "โหมดทดลอง"}</p><p className="text-sm font-bold">{session?.user?.name || "Guest learner"}</p></div>
               <div className="grid h-10 w-10 place-items-center rounded-2xl bg-coral/15 font-bold text-coral">{session?.user?.name?.slice(0, 1).toUpperCase() || "G"}</div>
@@ -406,9 +410,10 @@ export default function HomePage() {
           </header>
 
           <div className="mx-auto max-w-[1100px]">
-            {(activeTab === "review" || activeTab === "quiz" || activeTab === "fill") && <LearningScope categories={vocabularyCategories} value={learningCategoryId} onChange={setLearningCategoryId} />}
+            {(activeTab === "review" || activeTab === "vocabularyLearning" || activeTab === "quiz" || activeTab === "fill") && <LearningScope categories={vocabularyCategories} value={learningCategoryId} onChange={setLearningCategoryId} />}
             {activeTab === "dashboard" && <Dashboard words={vocabularyWords} dueWords={vocabularyDueWords} mastered={mastered} reviewedToday={reviewedToday} loading={loading} onNavigate={navigate} />}
             {activeTab === "review" && <ReviewView words={scopedDueWords} loading={loading} onReview={reviewWord} onNavigate={navigate} />}
+            {activeTab === "vocabularyLearning" && <VocabularyLearningView key={learnerKey} words={scopedDueWords} loading={loading} onReview={(id, rating) => reviewWord(id, rating, true)} onSpeak={speakText} onStopSpeech={stopSpeech} />}
             {activeTab === "quiz" && <QuizView words={learningWords} onComplete={saveQuizAttempt} />}
             {activeTab === "mastered" && <MasteredView words={masteredWords} loading={loading} />}
             {activeTab === "roots" && <RootLearningView />}
