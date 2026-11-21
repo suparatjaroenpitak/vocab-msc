@@ -36,8 +36,10 @@ import { parseVocabulary } from "@/lib/parser";
 import type { Category, LeaderboardSnapshot, ReviewRating, Word } from "@/lib/types";
 import { PWAInstallButton } from "@/components/pwa-register";
 import { PREFIX_GROUPS, PREFIX_WORD_COUNT } from "@/lib/prefix-vocabulary";
+import { PatternLearningView } from "@/components/pattern-learning";
+import { isSentencePattern, SENTENCE_PATTERN_CATEGORY } from "@/lib/pattern-learning";
 
-type Tab = "dashboard" | "review" | "quiz" | "fill" | "import" | "leaderboard" | "mastered" | "roots";
+type Tab = "dashboard" | "review" | "quiz" | "fill" | "import" | "leaderboard" | "mastered" | "roots" | "patterns";
 
 const sampleImport = `1. airborne (adj.) - ทางอากาศ, ทหารพลร่ม
 2. landing (n.) - การลงจอด, การยกพลขึ้นบก
@@ -143,6 +145,11 @@ function detectSpeechLanguage(text: string, fallback: "en-US" | "th-TH"): Speech
 let speechRequestId = 0;
 let speechVoices: SpeechSynthesisVoice[] = [];
 let speechVoicesRequest: Promise<SpeechSynthesisVoice[]> | null = null;
+
+function stopSpeech() {
+  ++speechRequestId;
+  if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
+}
 
 function loadSpeechVoices(): Promise<SpeechSynthesisVoice[]> {
   const synthesis = window.speechSynthesis;
@@ -278,18 +285,23 @@ export default function HomePage() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  const reviewedToday = useMemo(() => words.filter((word) => word.last_reviewed?.slice(0, 10) === new Date().toISOString().slice(0, 10)).length, [words]);
-  const masteredWords = useMemo(() => words.filter((word) => word.correct_count >= 7), [words]);
+  const patternWords = useMemo(() => words.filter(isSentencePattern), [words]);
+  const vocabularyWords = useMemo(() => words.filter((word) => !isSentencePattern(word)), [words]);
+  const vocabularyDueWords = useMemo(() => dueWords.filter((word) => !isSentencePattern(word)), [dueWords]);
+  const vocabularyCategories = useMemo(() => categories.filter((category) => category.name.trim().toLowerCase() !== SENTENCE_PATTERN_CATEGORY), [categories]);
+  const reviewedToday = useMemo(() => vocabularyWords.filter((word) => word.last_reviewed?.slice(0, 10) === new Date().toISOString().slice(0, 10)).length, [vocabularyWords]);
+  const masteredWords = useMemo(() => vocabularyWords.filter((word) => word.correct_count >= 7), [vocabularyWords]);
   const mastered = masteredWords.length;
-  const learningWords = useMemo(() => words.filter((word) => word.correct_count < 7 && (!learningCategoryId || word.category_id === learningCategoryId)), [learningCategoryId, words]);
-  const scopedDueWords = useMemo(() => learningCategoryId ? dueWords.filter((word) => word.category_id === learningCategoryId) : dueWords, [dueWords, learningCategoryId]);
+  const learningWords = useMemo(() => vocabularyWords.filter((word) => word.correct_count < 7 && (!learningCategoryId || word.category_id === learningCategoryId)), [learningCategoryId, vocabularyWords]);
+  const scopedDueWords = useMemo(() => learningCategoryId ? vocabularyDueWords.filter((word) => word.category_id === learningCategoryId) : vocabularyDueWords, [vocabularyDueWords, learningCategoryId]);
 
   function navigate(tab: Tab) {
+    stopSpeech();
     setActiveTab(tab);
     setSidebarOpen(false);
   }
 
-  async function reviewWord(id: number, rating: ReviewRating) {
+  async function reviewWord(id: number, rating: ReviewRating, quiet = false) {
     const updated = await requestJson<{ dueAt: string; intervalDays: number; reviewCount: number; correctCount: number; lastReviewed: string }>(`/api/words/${id}/review`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -307,7 +319,7 @@ export default function HomePage() {
     setWords(nextWords);
     setDueWords(nextDueWords);
     if (learnerKey) saveWordCache(learnerKey, nextWords);
-    setToast(updated.correctCount >= 7 ? "จำคำนี้ได้แม่นแล้ว! ย้ายไปอยู่ในส่วนจำแม่น" : rating === "known" ? `จำได้แล้ว · สะสม ${updated.correctCount}/7 ครั้ง` : "บันทึกไว้ทบทวนอีกครั้งใน 10 นาที");
+    if (!quiet) setToast(updated.correctCount >= 7 ? "จำคำนี้ได้แม่นแล้ว! ย้ายไปอยู่ในส่วนจำแม่น" : rating === "known" ? `จำได้แล้ว · สะสม ${updated.correctCount}/7 ครั้ง` : "บันทึกไว้ทบทวนอีกครั้งใน 10 นาที");
   }
 
   async function recordCorrectWords(wordIds: number[]) {
@@ -358,9 +370,10 @@ export default function HomePage() {
           <div className="mt-12 px-2 text-[11px] font-bold uppercase tracking-[0.18em] text-ink/35">workspace</div>
           <nav className="mt-3 space-y-1">
             <NavItem active={activeTab === "dashboard"} icon={<LayoutDashboard size={18} />} label="ภาพรวม" onClick={() => navigate("dashboard")} />
-            <NavItem active={activeTab === "review"} icon={<RotateCcw size={18} />} label="ทบทวนวันนี้" badge={dueWords.length} onClick={() => navigate("review")} />
+            <NavItem active={activeTab === "review"} icon={<RotateCcw size={18} />} label="ทบทวนวันนี้" badge={vocabularyDueWords.length} onClick={() => navigate("review")} />
             <NavItem active={activeTab === "mastered"} icon={<Brain size={18} />} label="จำแม่น" badge={mastered} onClick={() => navigate("mastered")} />
             <NavItem active={activeTab === "roots"} icon={<BookMarked size={18} />} label="เรียนรู้รากศัพท์" onClick={() => navigate("roots")} />
+            <NavItem active={activeTab === "patterns"} icon={<BookOpen size={18} />} label="ฝึกกลุ่มประโยค" onClick={() => navigate("patterns")} />
             <NavItem active={activeTab === "quiz"} icon={<CircleHelp size={18} />} label="ควิซคำศัพท์" onClick={() => navigate("quiz")} />
             <NavItem active={activeTab === "leaderboard"} icon={<Trophy size={18} />} label="สถิติและอันดับ" onClick={() => navigate("leaderboard")} />
             <NavItem active={activeTab === "fill"} icon={<GraduationCap size={18} />} label="เติมคำจากคำแปล" onClick={() => navigate("fill")} />
@@ -383,7 +396,7 @@ export default function HomePage() {
         <section className="min-w-0 flex-1 px-5 py-5 sm:px-8 lg:px-12 lg:py-8">
           <header className="flex items-center justify-between gap-4">
             <button className="rounded-xl border border-ink/10 bg-white/70 p-2.5 lg:hidden" onClick={() => setSidebarOpen(true)} aria-label="เปิดเมนู"><Menu size={19} /></button>
-            <div className="hidden items-center gap-2 text-sm text-ink/40 sm:flex"><span className="h-2 w-2 rounded-full bg-emerald-400" /> ระบบพร้อมใช้งาน <span className="text-ink/20">/</span> {activeTab === "dashboard" ? "ภาพรวม" : activeTab === "review" ? "ทบทวน" : activeTab === "quiz" ? "ควิซ" : activeTab === "fill" ? "เติมคำ" : activeTab === "leaderboard" ? "สถิติและอันดับ" : activeTab === "mastered" ? "จำแม่น" : activeTab === "roots" ? "เรียนรู้รากศัพท์" : "นำเข้า"}</div>
+            <div className="hidden items-center gap-2 text-sm text-ink/40 sm:flex"><span className="h-2 w-2 rounded-full bg-emerald-400" /> ระบบพร้อมใช้งาน <span className="text-ink/20">/</span> {activeTab === "dashboard" ? "ภาพรวม" : activeTab === "review" ? "ทบทวน" : activeTab === "quiz" ? "ควิซ" : activeTab === "fill" ? "เติมคำ" : activeTab === "leaderboard" ? "สถิติและอันดับ" : activeTab === "mastered" ? "จำแม่น" : activeTab === "roots" ? "เรียนรู้รากศัพท์" : activeTab === "patterns" ? "ฝึกกลุ่มประโยค" : "นำเข้า"}</div>
             <div className="ml-auto flex items-center gap-3">
               <div className="hidden text-right sm:block"><p className="text-xs font-semibold text-ink/40">{session?.user?.email ? "บัญชีของคุณ" : "โหมดทดลอง"}</p><p className="text-sm font-bold">{session?.user?.name || "Guest learner"}</p></div>
               <div className="grid h-10 w-10 place-items-center rounded-2xl bg-coral/15 font-bold text-coral">{session?.user?.name?.slice(0, 1).toUpperCase() || "G"}</div>
@@ -393,12 +406,13 @@ export default function HomePage() {
           </header>
 
           <div className="mx-auto max-w-[1100px]">
-            {(activeTab === "review" || activeTab === "quiz" || activeTab === "fill") && <LearningScope categories={categories} value={learningCategoryId} onChange={setLearningCategoryId} />}
-            {activeTab === "dashboard" && <Dashboard words={words} dueWords={dueWords} mastered={mastered} reviewedToday={reviewedToday} loading={loading} onNavigate={navigate} />}
+            {(activeTab === "review" || activeTab === "quiz" || activeTab === "fill") && <LearningScope categories={vocabularyCategories} value={learningCategoryId} onChange={setLearningCategoryId} />}
+            {activeTab === "dashboard" && <Dashboard words={vocabularyWords} dueWords={vocabularyDueWords} mastered={mastered} reviewedToday={reviewedToday} loading={loading} onNavigate={navigate} />}
             {activeTab === "review" && <ReviewView words={scopedDueWords} loading={loading} onReview={reviewWord} onNavigate={navigate} />}
             {activeTab === "quiz" && <QuizView words={learningWords} onComplete={saveQuizAttempt} />}
             {activeTab === "mastered" && <MasteredView words={masteredWords} loading={loading} />}
             {activeTab === "roots" && <RootLearningView />}
+            {activeTab === "patterns" && <PatternLearningView key={learnerKey} words={patternWords} loading={loading} onReview={(id, rating) => reviewWord(id, rating, true)} onSpeak={speakText} onStopSpeech={stopSpeech} />}
             {activeTab === "leaderboard" && <LeaderboardView data={leaderboard} loading={leaderboardLoading} error={leaderboardError} onRetry={() => void loadLeaderboard()} />}
             {activeTab === "fill" && <FillView words={learningWords} onCorrect={recordCorrectWords} onToast={setToast} />}
             {activeTab === "import" && <ImportView categories={categories} onCategoryCreated={(category) => setCategories((current) => [...current, category])} onDone={async (message) => { setToast(message); const [, categoryResponse] = await Promise.all([learnerKey ? loadWords(learnerKey) : Promise.resolve(), fetch("/api/categories")]); setCategories((await categoryResponse.json()) as Category[]); navigate("dashboard"); }} />}
