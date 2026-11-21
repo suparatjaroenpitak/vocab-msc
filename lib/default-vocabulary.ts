@@ -4,19 +4,28 @@ import type { getDb } from "@/lib/db";
 import { GOVERNMENT_EXAM_VOCABULARY } from "@/lib/government-exam-vocabulary";
 import { SENTENCE_PATTERN_VOCABULARY } from "@/lib/sentence-pattern-vocabulary";
 import { TOEIC_PASTED_VOCABULARY } from "@/lib/toeic-pasted-vocabulary";
+import {
+  CATEGORY_HIERARCHY_SEED_KEY,
+  GOVERNMENT_CATEGORY,
+  GOVERNMENT_SUBCATEGORY_NAMES,
+  getSeedSubcategoryName,
+  SENTENCE_PATTERN_CATEGORY,
+  TOEIC_CATEGORY,
+  TOEIC_SUBCATEGORY_NAMES
+} from "@/lib/category-hierarchy";
 
 type Db = ReturnType<typeof getDb>;
 
 const seededUsers = new Map<string, Promise<void>>();
 
 export const DEFAULT_VOCABULARY_SEED_KEY = "toeic-business-500-v1";
-export const DEFAULT_VOCABULARY_CATEGORY = "TOEIC";
+export const DEFAULT_VOCABULARY_CATEGORY = TOEIC_CATEGORY;
 export const TOEIC_PASTED_VOCABULARY_SEED_KEY = "toeic-pasted-500-v2";
 export const GOVERNMENT_EXAM_VOCABULARY_SEED_KEY = "government-exam-pasted-533-v1";
-export const GOVERNMENT_EXAM_VOCABULARY_CATEGORY = "คำศัพท์ กพ";
+export const GOVERNMENT_EXAM_VOCABULARY_CATEGORY = GOVERNMENT_CATEGORY;
 export const VOCABULARY_CLEANUP_SEED_KEY = "keep-toeic-government-only-v1";
 export const SENTENCE_PATTERN_VOCABULARY_SEED_KEY = "sentence-pattern-997-v1";
-export const SENTENCE_PATTERN_VOCABULARY_CATEGORY = "pattle กลุ่มประโยค";
+export const SENTENCE_PATTERN_VOCABULARY_CATEGORY = SENTENCE_PATTERN_CATEGORY;
 
 const ALLOWED_VOCABULARY_CATEGORIES = [
   DEFAULT_VOCABULARY_CATEGORY,
@@ -549,8 +558,8 @@ export async function ensureDefaultVocabulary(db: Db, userEmail: string) {
 
     const now = new Date().toISOString();
     if (!seedState) {
-      await tx.insert(categories).values({ user_email: userEmail, name: DEFAULT_VOCABULARY_CATEGORY, created_at: now })
-        .onConflictDoNothing({ target: [categories.user_email, categories.name] });
+      await tx.insert(categories).values({ user_email: userEmail, name: DEFAULT_VOCABULARY_CATEGORY, parent_id: null, created_at: now })
+        .onConflictDoNothing();
       const [category] = await tx.select({ id: categories.id }).from(categories).where(and(
         eq(categories.user_email, userEmail),
         eq(categories.name, DEFAULT_VOCABULARY_CATEGORY)
@@ -588,8 +597,8 @@ export async function ensureDefaultVocabulary(db: Db, userEmail: string) {
       eq(userSeedStates.seed_key, TOEIC_PASTED_VOCABULARY_SEED_KEY)
     )).limit(1);
     if (!toeicPastedSeedState) {
-      await tx.insert(categories).values({ user_email: userEmail, name: DEFAULT_VOCABULARY_CATEGORY, created_at: now })
-        .onConflictDoNothing({ target: [categories.user_email, categories.name] });
+      await tx.insert(categories).values({ user_email: userEmail, name: DEFAULT_VOCABULARY_CATEGORY, parent_id: null, created_at: now })
+        .onConflictDoNothing();
       const [toeicCategory] = await tx.select({ id: categories.id }).from(categories).where(and(
         eq(categories.user_email, userEmail),
         eq(categories.name, DEFAULT_VOCABULARY_CATEGORY)
@@ -632,8 +641,8 @@ export async function ensureDefaultVocabulary(db: Db, userEmail: string) {
       eq(userSeedStates.seed_key, GOVERNMENT_EXAM_VOCABULARY_SEED_KEY)
     )).limit(1);
     if (!governmentSeedState) {
-      await tx.insert(categories).values({ user_email: userEmail, name: GOVERNMENT_EXAM_VOCABULARY_CATEGORY, created_at: now })
-        .onConflictDoNothing({ target: [categories.user_email, categories.name] });
+      await tx.insert(categories).values({ user_email: userEmail, name: GOVERNMENT_EXAM_VOCABULARY_CATEGORY, parent_id: null, created_at: now })
+        .onConflictDoNothing();
       const [governmentCategory] = await tx.select({ id: categories.id }).from(categories).where(and(
         eq(categories.user_email, userEmail),
         eq(categories.name, GOVERNMENT_EXAM_VOCABULARY_CATEGORY)
@@ -672,8 +681,8 @@ export async function ensureDefaultVocabulary(db: Db, userEmail: string) {
     )).limit(1);
     if (!cleanupSeedState) {
       for (const categoryName of ALLOWED_VOCABULARY_CATEGORIES) {
-        await tx.insert(categories).values({ user_email: userEmail, name: categoryName, created_at: now })
-          .onConflictDoNothing({ target: [categories.user_email, categories.name] });
+        await tx.insert(categories).values({ user_email: userEmail, name: categoryName, parent_id: null, created_at: now })
+          .onConflictDoNothing();
       }
       const allowedCategories = await tx.select({ id: categories.id }).from(categories).where(and(
         eq(categories.user_email, userEmail),
@@ -697,13 +706,59 @@ export async function ensureDefaultVocabulary(db: Db, userEmail: string) {
       }).onConflictDoNothing({ target: [userSeedStates.user_email, userSeedStates.seed_key] });
     }
 
+    const [hierarchySeedState] = await tx.select({ id: userSeedStates.id }).from(userSeedStates).where(and(
+      eq(userSeedStates.user_email, userEmail),
+      eq(userSeedStates.seed_key, CATEGORY_HIERARCHY_SEED_KEY)
+    )).limit(1);
+    if (!hierarchySeedState) {
+      const mainNames = [DEFAULT_VOCABULARY_CATEGORY, GOVERNMENT_EXAM_VOCABULARY_CATEGORY];
+      const mainIds = new Map<string, number>();
+      const subIds = new Map<string, number>();
+      for (const mainName of mainNames) {
+        await tx.insert(categories).values({ user_email: userEmail, name: mainName, parent_id: null, created_at: now }).onConflictDoNothing();
+        const [main] = await tx.select({ id: categories.id }).from(categories).where(and(
+          eq(categories.user_email, userEmail), eq(categories.name, mainName), isNull(categories.parent_id)
+        )).limit(1);
+        if (!main) throw new Error(`Unable to find main vocabulary category: ${mainName}`);
+        mainIds.set(mainName, main.id);
+        const subcategoryNames = mainName === DEFAULT_VOCABULARY_CATEGORY ? TOEIC_SUBCATEGORY_NAMES : GOVERNMENT_SUBCATEGORY_NAMES;
+        for (const subcategoryName of subcategoryNames) {
+          await tx.insert(categories).values({ user_email: userEmail, name: subcategoryName, parent_id: main.id, created_at: now }).onConflictDoNothing();
+          const [subcategory] = await tx.select({ id: categories.id }).from(categories).where(and(
+            eq(categories.user_email, userEmail), eq(categories.name, subcategoryName), eq(categories.parent_id, main.id)
+          )).limit(1);
+          if (subcategory) subIds.set(`${mainName}:${subcategoryName}`, subcategory.id);
+        }
+      }
+
+      const toeicIndexByTerm = new Map<string, number>();
+      DEFAULT_VOCABULARY.forEach((word, index) => toeicIndexByTerm.set(word.term.toLowerCase(), index));
+      TOEIC_PASTED_VOCABULARY.forEach((word, index) => { if (!toeicIndexByTerm.has(word.term.toLowerCase())) toeicIndexByTerm.set(word.term.toLowerCase(), index); });
+      const seedWords = await tx.select({ id: words.id, term: words.term, part_of_speech: words.part_of_speech, definition: words.definition, category_id: words.category_id })
+        .from(words).where(and(eq(words.user_email, userEmail), inArray(words.category_id, Array.from(mainIds.values()))));
+      for (const word of seedWords) {
+        const mainName = word.category_id === mainIds.get(DEFAULT_VOCABULARY_CATEGORY) ? DEFAULT_VOCABULARY_CATEGORY : GOVERNMENT_EXAM_VOCABULARY_CATEGORY;
+        const index = mainName === DEFAULT_VOCABULARY_CATEGORY ? (toeicIndexByTerm.get(word.term.toLowerCase()) ?? -1) : -1;
+        const subcategoryName = getSeedSubcategoryName(mainName, index, word.term, word.part_of_speech, word.definition);
+        const subcategoryId = subIds.get(`${mainName}:${subcategoryName}`);
+        if (subcategoryId) {
+          await tx.update(words).set({ category_id: subcategoryId, updated_at: now }).where(and(eq(words.user_email, userEmail), eq(words.id, word.id)));
+        }
+      }
+      await tx.insert(userSeedStates).values({
+        user_email: userEmail,
+        seed_key: CATEGORY_HIERARCHY_SEED_KEY,
+        applied_at: now
+      }).onConflictDoNothing({ target: [userSeedStates.user_email, userSeedStates.seed_key] });
+    }
+
     const [sentencePatternSeedState] = await tx.select({ id: userSeedStates.id }).from(userSeedStates).where(and(
       eq(userSeedStates.user_email, userEmail),
       eq(userSeedStates.seed_key, SENTENCE_PATTERN_VOCABULARY_SEED_KEY)
     )).limit(1);
     if (!sentencePatternSeedState) {
-      await tx.insert(categories).values({ user_email: userEmail, name: SENTENCE_PATTERN_VOCABULARY_CATEGORY, created_at: now })
-        .onConflictDoNothing({ target: [categories.user_email, categories.name] });
+      await tx.insert(categories).values({ user_email: userEmail, name: SENTENCE_PATTERN_VOCABULARY_CATEGORY, parent_id: null, created_at: now })
+        .onConflictDoNothing();
       const [sentencePatternCategory] = await tx.select({ id: categories.id }).from(categories).where(and(
         eq(categories.user_email, userEmail),
         eq(categories.name, SENTENCE_PATTERN_VOCABULARY_CATEGORY)

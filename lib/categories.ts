@@ -1,43 +1,80 @@
 import { categories, words } from "@/db/schema";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { getDb } from "@/lib/db";
+import {
+  DEFAULT_IMPORT_CATEGORY,
+  MAIN_CATEGORY_NAMES,
+  SENTENCE_PATTERN_CATEGORY,
+  suggestMainCategoryName,
+  suggestSubcategoryName
+} from "@/lib/category-hierarchy";
 
 type Db = ReturnType<typeof getDb>;
 
+function parentCondition(parentId: number | null) {
+  return parentId === null ? isNull(categories.parent_id) : eq(categories.parent_id, parentId);
+}
+
+async function findCategory(db: Db, userEmail: string, name: string, parentId: number | null) {
+  const [category] = await db.select({ id: categories.id, name: categories.name, parent_id: categories.parent_id })
+    .from(categories)
+    .where(and(eq(categories.user_email, userEmail), eq(categories.name, name), parentCondition(parentId)))
+    .limit(1);
+  return category;
+}
+
+export async function ensureCategory(db: Db, userEmail: string, name: string, parentId: number | null = null) {
+  const existing = await findCategory(db, userEmail, name, parentId);
+  if (existing) return existing;
+  await db.insert(categories).values({ user_email: userEmail, name, parent_id: parentId, created_at: new Date().toISOString() }).onConflictDoNothing();
+  const created = await findCategory(db, userEmail, name, parentId);
+  if (!created) throw new Error(`Unable to create category: ${name}`);
+  return created;
+}
+
 export function suggestCategoryName(term: string, partOfSpeech: string, definition: string) {
-  const text = `${term} ${partOfSpeech} ${definition}`.toLowerCase();
-  if (/phr\.?\s*v|phrase|idiom|pipe down|spread out|set up|clear out|dropping in|taking aim/.test(text)) return "วลีและสำนวน";
-  if (/baseball|pitcher|lefty|inning|กีฬา|การแข่งขัน|เกม|series|winning|team|player|ball/.test(text)) return "กีฬา";
-  if (/airborne|drop zone|unit|enemy|territory|sergeant|headquarters|intel|machine gun|regiment|strong point|town hall|german|flank|battle|engagement|sniper|defend|fortif|ทหาร|รบ|ปืน|ศัตรู|กองบัญชาการ/.test(text)) return "การทหาร";
-  if (/landing|road|beach|town|crossroad|church|location|center|สถานที่|ถนน|ชายหาด|เมือง|โบสถ์|ทางแยก/.test(text)) return "สถานที่และการเดินทาง";
-  return "ทั่วไป";
+  return suggestSubcategoryName(suggestMainCategoryName(term, partOfSpeech, definition), term, partOfSpeech, definition);
 }
 
 export async function ensureUserCategories(db: Db, userEmail: string) {
-  const now = new Date().toISOString();
-  const categoryRows = await db.select({ id: categories.id, name: categories.name }).from(categories).where(eq(categories.user_email, userEmail));
-  const byName = new Map(categoryRows.map((category) => [category.name, category.id]));
-  const uncategorized = await db.select({ id: words.id, term: words.term, part_of_speech: words.part_of_speech, definition: words.definition }).from(words).where(and(eq(words.user_email, userEmail), isNull(words.category_id)));
+  for (const name of MAIN_CATEGORY_NAMES) await ensureCategory(db, userEmail, name);
+
+  const categoryRows = await db.select({ id: categories.id, name: categories.name, parent_id: categories.parent_id })
+    .from(categories).where(eq(categories.user_email, userEmail));
+  const uncategorized = await db.select({ id: words.id, term: words.term, part_of_speech: words.part_of_speech, definition: words.definition })
+    .from(words).where(and(eq(words.user_email, userEmail), isNull(words.category_id)));
   const idsByCategory = new Map<number, number[]>();
   for (const word of uncategorized) {
-    const categoryId = byName.get(suggestCategoryName(word.term, word.part_of_speech, word.definition));
-    if (!categoryId) continue;
-    const ids = idsByCategory.get(categoryId) ?? [];
+    const mainName = suggestMainCategoryName(word.term, word.part_of_speech, word.definition);
+    const main = categoryRows.find((category) => category.name === mainName && category.parent_id === null)
+      ?? await ensureCategory(db, userEmail, mainName);
+    const subName = suggestSubcategoryName(mainName, word.term, word.part_of_speech, word.definition);
+    const sub = await ensureCategory(db, userEmail, subName, main.id);
+    const ids = idsByCategory.get(sub.id) ?? [];
     ids.push(word.id);
-    idsByCategory.set(categoryId, ids);
+    idsByCategory.set(sub.id, ids);
   }
+  const now = new Date().toISOString();
   for (const [categoryId, ids] of Array.from(idsByCategory.entries())) {
-    await db.update(words).set({ category_id: categoryId, updated_at: now }).where(and(eq(words.user_email, userEmail), inArray(words.id, ids)));
+    await db.update(words).set({ category_id: categoryId, updated_at: now })
+      .where(and(eq(words.user_email, userEmail), inArray(words.id, ids)));
   }
-  return categoryRows;
+  return db.select({ id: categories.id, name: categories.name, parent_id: categories.parent_id })
+    .from(categories).where(eq(categories.user_email, userEmail));
 }
 
 export async function getCategoryIdForWord(db: Db, userEmail: string, term: string, partOfSpeech: string, definition: string, requestedCategoryId?: number | null) {
   if (requestedCategoryId) {
-    const [requested] = await db.select({ id: categories.id }).from(categories).where(and(eq(categories.id, requestedCategoryId), eq(categories.user_email, userEmail))).limit(1);
-    if (requested) return requested.id;
+    const [requested] = await db.select({ id: categories.id, name: categories.name, parent_id: categories.parent_id })
+      .from(categories).where(and(eq(categories.id, requestedCategoryId), eq(categories.user_email, userEmail))).limit(1);
+    if (requested) {
+      if (requested.parent_id !== null || requested.name === SENTENCE_PATTERN_CATEGORY) return requested.id;
+      const subName = suggestSubcategoryName(requested.name, term, partOfSpeech, definition);
+      return (await ensureCategory(db, userEmail, subName, requested.id)).id;
+    }
   }
-  const suggestedName = suggestCategoryName(term, partOfSpeech, definition);
-  const [suggested] = await db.select({ id: categories.id }).from(categories).where(and(eq(categories.user_email, userEmail), eq(categories.name, suggestedName))).limit(1);
-  return suggested?.id ?? null;
+  const mainName = suggestMainCategoryName(term, partOfSpeech, definition) || DEFAULT_IMPORT_CATEGORY;
+  const main = await ensureCategory(db, userEmail, mainName);
+  const subName = suggestSubcategoryName(mainName, term, partOfSpeech, definition);
+  return (await ensureCategory(db, userEmail, subName, main.id)).id;
 }

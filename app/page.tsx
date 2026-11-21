@@ -295,8 +295,12 @@ export default function HomePage() {
   const reviewedToday = useMemo(() => vocabularyWords.filter((word) => word.last_reviewed?.slice(0, 10) === new Date().toISOString().slice(0, 10)).length, [vocabularyWords]);
   const masteredWords = useMemo(() => vocabularyWords.filter((word) => word.correct_count >= 7), [vocabularyWords]);
   const mastered = masteredWords.length;
-  const learningWords = useMemo(() => vocabularyWords.filter((word) => word.correct_count < 7 && (!learningCategoryId || word.category_id === learningCategoryId)), [learningCategoryId, vocabularyWords]);
-  const scopedDueWords = useMemo(() => learningCategoryId ? vocabularyDueWords.filter((word) => word.category_id === learningCategoryId) : vocabularyDueWords, [vocabularyDueWords, learningCategoryId]);
+  const learningCategoryIds = useMemo(() => {
+    if (!learningCategoryId) return null;
+    return new Set([learningCategoryId, ...categories.filter((category) => category.parent_id === learningCategoryId).map((category) => category.id)]);
+  }, [categories, learningCategoryId]);
+  const learningWords = useMemo(() => vocabularyWords.filter((word) => word.correct_count < 7 && (!learningCategoryIds || learningCategoryIds.has(word.category_id ?? -1))), [learningCategoryIds, vocabularyWords]);
+  const scopedDueWords = useMemo(() => learningCategoryIds ? vocabularyDueWords.filter((word) => learningCategoryIds.has(word.category_id ?? -1)) : vocabularyDueWords, [vocabularyDueWords, learningCategoryIds]);
 
   function navigate(tab: Tab) {
     stopSpeech();
@@ -434,7 +438,11 @@ function NavItem({ active, icon, label, badge, onClick }: { active: boolean; ico
 }
 
 function LearningScope({ categories, value, onChange }: { categories: Category[]; value: number | null; onChange: (value: number | null) => void }) {
-  return <div className="mt-7 flex flex-col gap-3 rounded-2xl border border-ink/10 bg-white px-4 py-3 shadow-card sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-xl bg-lilac text-ink"><Target size={16} /></span><div><p className="text-xs font-bold uppercase tracking-[0.14em] text-ink/35">learning scope</p><p className="text-sm font-bold">เลือกคลังที่จะเรียนรู้</p></div></div><select value={value ?? ""} onChange={(event) => onChange(event.target.value ? Number(event.target.value) : null)} className="rounded-xl border border-ink/10 bg-cream px-3 py-2.5 text-sm font-semibold outline-none focus:border-coral"><option value="">ทุกคำศัพท์</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name} · {category.word_count} คำ</option>)}</select></div>;
+  const selected = categories.find((category) => category.id === value);
+  const mainCategories = categories.filter((category) => category.parent_id === null);
+  const mainId = selected ? (selected.parent_id ?? selected.id) : null;
+  const subcategories = mainId ? categories.filter((category) => category.parent_id === mainId) : [];
+  return <div className="mt-7 flex flex-col gap-3 rounded-2xl border border-ink/10 bg-white px-4 py-3 shadow-card"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-xl bg-lilac text-ink"><Target size={16} /></span><div><p className="text-xs font-bold uppercase tracking-[0.14em] text-ink/35">learning scope</p><p className="text-sm font-bold">เลือกหมวดหลักและหมวดย่อยที่จะเรียนรู้</p></div></div><div className="grid gap-2 sm:grid-cols-2"><select aria-label="เลือกหมวดหลัก" value={mainId ?? ""} onChange={(event) => onChange(event.target.value ? Number(event.target.value) : null)} className="rounded-xl border border-ink/10 bg-cream px-3 py-2.5 text-sm font-semibold outline-none focus:border-coral"><option value="">ทุกหมวดหลัก</option>{mainCategories.map((category) => <option key={category.id} value={category.id}>{category.name} · {category.word_count} คำ</option>)}</select><select aria-label="เลือกหมวดย่อย" value={selected?.parent_id !== null && selected?.parent_id !== undefined ? selected.id : ""} disabled={!mainId || !subcategories.length} onChange={(event) => onChange(event.target.value ? Number(event.target.value) : mainId)} className="rounded-xl border border-ink/10 bg-cream px-3 py-2.5 text-sm font-semibold outline-none focus:border-coral disabled:cursor-not-allowed disabled:opacity-50"><option value="">ทุกหมวดย่อย</option>{subcategories.map((category) => <option key={category.id} value={category.id}>{category.name} · {category.word_count} คำ</option>)}</select></div></div>;
 }
 
 function Dashboard({ words, dueWords, mastered, reviewedToday, loading, onNavigate }: { words: Word[]; dueWords: Word[]; mastered: number; reviewedToday: number; loading: boolean; onNavigate: (tab: Tab) => void }) {
@@ -645,11 +653,17 @@ function CategoryPicker({ categories, value, onChange, onCreated }: { categories
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [createAsMain, setCreateAsMain] = useState(false);
+  const mainCategories = categories.filter((category) => category.parent_id === null);
+  const selected = categories.find((category) => String(category.id) === value);
+  const defaultMain = mainCategories.find((category) => category.name === "TOEIC") ?? mainCategories[0];
+  const mainId = selected ? (selected.parent_id ?? selected.id) : defaultMain?.id ?? "";
+  const subcategories = mainId ? categories.filter((category) => category.parent_id === Number(mainId)) : [];
   async function createCategory() {
     if (!name.trim() || busy) return;
     setBusy(true);
     try {
-      const category = await requestJson<Category>("/api/categories", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+      const category = await requestJson<Category>("/api/categories", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, parentId: createAsMain ? null : Number(mainId) || null }) });
       onCreated(category);
       onChange(String(category.id));
       setName("");
@@ -660,7 +674,7 @@ function CategoryPicker({ categories, value, onChange, onCreated }: { categories
       setBusy(false);
     }
   }
-  return <div className="rounded-2xl border border-ink/10 bg-cream p-3"><div className="flex items-center justify-between gap-3"><label className="text-xs font-bold uppercase tracking-[0.14em] text-ink/40">หมวดหมู่</label><button type="button" onClick={() => setCreating((current) => !current)} className="text-xs font-bold text-coral hover:underline">{creating ? "ยกเลิก" : "+ สร้างใหม่"}</button></div><select value={value} onChange={(event) => onChange(event.target.value)} className="mt-2 w-full rounded-xl border border-ink/10 bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-coral"><option value="">จัดหมวดหมู่อัตโนมัติ</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name} · {category.word_count} คำ</option>)}</select>{creating && <div className="mt-2 flex gap-2"><input value={name} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void createCategory(); }} placeholder="ชื่อหมวดหมู่ใหม่" className="min-w-0 flex-1 rounded-xl border border-ink/10 bg-white px-3 py-2 text-sm outline-none focus:border-coral" /><button type="button" disabled={busy || !name.trim()} onClick={() => void createCategory()} className="rounded-xl bg-ink px-3 py-2 text-xs font-bold text-white disabled:opacity-40">สร้าง</button></div>}</div>;
+  return <div className="rounded-2xl border border-ink/10 bg-cream p-3"><div className="flex items-center justify-between gap-3"><label className="text-xs font-bold uppercase tracking-[0.14em] text-ink/40">หมวดหมู่หลักและย่อย</label><button type="button" onClick={() => setCreating((current) => !current)} className="text-xs font-bold text-coral hover:underline">{creating ? "ยกเลิก" : "+ สร้างหมวด"}</button></div><select aria-label="เลือกหมวดหมู่หลัก" value={mainId} onChange={(event) => onChange(event.target.value)} className="mt-2 w-full rounded-xl border border-ink/10 bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-coral"><option value="">เลือกหมวดหลัก</option>{mainCategories.map((category) => <option key={category.id} value={category.id}>{category.name} · {category.word_count} คำ</option>)}</select><select aria-label="เลือกหมวดหมู่ย่อย" value={selected?.parent_id !== null && selected?.parent_id !== undefined ? selected.id : ""} disabled={!mainId || !subcategories.length} onChange={(event) => onChange(event.target.value || String(mainId))} className="mt-2 w-full rounded-xl border border-ink/10 bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-coral disabled:cursor-not-allowed disabled:opacity-50"><option value="">จัดหมวดย่อยอัตโนมัติตามคำศัพท์</option>{subcategories.map((category) => <option key={category.id} value={category.id}>{category.name} · {category.word_count} คำ</option>)}</select>{creating && <div className="mt-2 rounded-xl border border-ink/10 bg-white p-2"><label className="flex items-center gap-2 text-xs font-semibold text-ink/60"><input type="checkbox" checked={createAsMain} onChange={(event) => setCreateAsMain(event.target.checked)} />สร้างเป็นหมวดหลัก</label><div className="mt-2 flex gap-2"><input value={name} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void createCategory(); }} placeholder={createAsMain ? "ชื่อหมวดหลักใหม่" : "ชื่อหมวดย่อยใหม่"} className="min-w-0 flex-1 rounded-xl border border-ink/10 bg-cream px-3 py-2 text-sm outline-none focus:border-coral" /><button type="button" disabled={busy || !name.trim()} onClick={() => void createCategory()} className="rounded-xl bg-ink px-3 py-2 text-xs font-bold text-white disabled:opacity-40">สร้าง</button></div></div>}</div>;
 }
 
 function ImportView({ categories, onCategoryCreated, onDone }: { categories: Category[]; onCategoryCreated: (category: Category) => void; onDone: (message: string) => Promise<void> }) {

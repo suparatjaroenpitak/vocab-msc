@@ -4,10 +4,12 @@ export const categories = pgTable("categories", {
   id: serial("id").primaryKey(),
   user_email: text("user_email").notNull(),
   name: text("name").notNull(),
+  parent_id: integer("parent_id"),
   created_at: text("created_at").notNull()
 }, (table) => [
-  uniqueIndex("categories_user_name_idx").on(table.user_email, table.name),
-  index("categories_user_idx").on(table.user_email)
+  uniqueIndex("categories_user_parent_name_idx").on(table.user_email, table.parent_id, table.name),
+  index("categories_user_idx").on(table.user_email),
+  index("categories_parent_idx").on(table.user_email, table.parent_id)
 ]);
 
 export const words = pgTable("words", {

@@ -2,7 +2,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { categories, quizAttempts, userSeedStates, words } from "@/db/schema";
 import { and, eq, sql } from "drizzle-orm";
-import { ensureUserCategories, suggestCategoryName } from "@/lib/categories";
+import { ensureUserCategories, getCategoryIdForWord } from "@/lib/categories";
 import type { ParsedWord } from "@/lib/types";
 
 const globalForDb = globalThis as unknown as { postgresPool?: Pool };
@@ -23,12 +23,11 @@ export async function importWords(userEmail: string, parsed: ParsedWord[], reque
   const unique = new Map(parsed.map((word) => [word.term, word]));
   const db = getDb();
   const categoryRows = await ensureUserCategories(db, userEmail);
-  const categoryByName = new Map(categoryRows.map((category) => [category.name, category.id]));
   const requestedCategory = requestedCategoryId ? categoryRows.find((category) => category.id === requestedCategoryId) : undefined;
   const values = await Promise.all(Array.from(unique.values()).map(async (word) => ({
     user_email: userEmail, term: word.term, part_of_speech: word.partOfSpeech,
     definition: word.definition,
-    category_id: requestedCategory?.id ?? categoryByName.get(suggestCategoryName(word.term, word.partOfSpeech, word.definition)) ?? null,
+    category_id: await getCategoryIdForWord(db, userEmail, word.term, word.partOfSpeech, word.definition, requestedCategory?.id),
     due_at: now, created_at: now, updated_at: now
   })));
   await db.insert(words).values(values).onConflictDoUpdate({
