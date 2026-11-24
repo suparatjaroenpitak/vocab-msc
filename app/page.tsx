@@ -35,7 +35,7 @@ import { requestJson } from "@/lib/request-json";
 import { parseVocabulary } from "@/lib/parser";
 import type { Category, LeaderboardSnapshot, ReviewRating, Word } from "@/lib/types";
 import { PWAInstallButton } from "@/components/pwa-register";
-import { PREFIX_GROUPS, PREFIX_WORD_COUNT } from "@/lib/prefix-vocabulary";
+import { PREFIX_GROUPS, PREFIX_WORD_COUNT, ROOT_WORD_COUNT, SUFFIX_GROUPS, SUFFIX_WORD_COUNT } from "@/lib/prefix-vocabulary";
 import { PatternLearningView } from "@/components/pattern-learning";
 import { VocabularyLearningView } from "@/components/vocabulary-learning";
 import { isSentencePattern, SENTENCE_PATTERN_CATEGORY } from "@/lib/pattern-learning";
@@ -471,11 +471,19 @@ function MasteredView({ words, loading }: { words: Word[]; loading: boolean }) {
 }
 
 function RootLearningView() {
+  const [mode, setMode] = useState<"prefix" | "suffix">("prefix");
   const [groupIndex, setGroupIndex] = useState(0);
   const [exampleIndex, setExampleIndex] = useState(0);
   const [showMeaning, setShowMeaning] = useState(false);
-  const group = PREFIX_GROUPS[groupIndex];
-  const example = group.examples[exampleIndex];
+  const groups = mode === "prefix" ? PREFIX_GROUPS : SUFFIX_GROUPS;
+  const group = groups[groupIndex];
+  const example = group?.examples[exampleIndex];
+
+  useEffect(() => {
+    setGroupIndex(0);
+    setExampleIndex(0);
+    setShowMeaning(false);
+  }, [mode]);
 
   function chooseGroup(index: number) {
     setGroupIndex(index);
@@ -493,20 +501,23 @@ function RootLearningView() {
   }
 
   function randomExample() {
-    const nextGroupIndex = Math.floor(Math.random() * PREFIX_GROUPS.length);
-    const nextGroup = PREFIX_GROUPS[nextGroupIndex];
+    const nextGroupIndex = Math.floor(Math.random() * groups.length);
+    const nextGroup = groups[nextGroupIndex];
     chooseGroup(nextGroupIndex);
     setExampleIndex(Math.floor(Math.random() * nextGroup.examples.length));
     setShowMeaning(false);
   }
 
   if (!group || !example) return null;
-  return <div className="py-10 lg:py-14"><PageTitle eyebrow="prefix roots · ก.พ. & TOEIC" title="เรียนรู้รากศัพท์จาก Prefix" description={`จำความหมายของคำอุปสรรค แล้วใช้เดาคำศัพท์ใหม่จากส่วนหน้าของคำได้ง่ายขึ้น · ${PREFIX_GROUPS.length} กลุ่ม ${PREFIX_WORD_COUNT} คำ`} />
-    <div className="mt-7 flex flex-wrap items-center gap-3 rounded-2xl border border-ink/10 bg-white px-5 py-4 shadow-card"><BookMarked className="text-coral" size={20} /><p className="text-sm font-semibold text-ink/70">Prefix คือส่วนที่เติมหน้าคำศัพท์ เช่น <strong>re-</strong> แปลว่า “อีกครั้ง” ดังนั้น <strong>rewrite</strong> คือ “เขียนใหม่”</p></div>
+  const isPrefix = mode === "prefix";
+  const wordCount = isPrefix ? PREFIX_WORD_COUNT : SUFFIX_WORD_COUNT;
+  return <div className="py-10 lg:py-14"><PageTitle eyebrow={`${mode} roots · ก.พ. & TOEIC`} title="เรียนรู้รากศัพท์ Prefix และ Suffix" description={`เรียนรู้ส่วนประกอบของคำศัพท์เพื่อเดาความหมายได้เร็วขึ้น · Prefix ${PREFIX_WORD_COUNT} คำ + Suffix ${SUFFIX_WORD_COUNT} คำ = ${ROOT_WORD_COUNT} คำ`} />
+    <div className="mt-7 grid gap-2 rounded-2xl border border-ink/10 bg-white p-2 shadow-card sm:grid-cols-2"><button onClick={() => setMode("prefix")} className={`rounded-xl px-4 py-3 text-left transition ${isPrefix ? "bg-ink text-white shadow-card" : "text-ink/55 hover:bg-ink/5"}`}><span className="block text-sm font-bold">Prefix · คำเติมหน้า</span><span className={`mt-1 block text-xs ${isPrefix ? "text-white/55" : "text-ink/35"}`}>{PREFIX_GROUPS.length} กลุ่ม · {PREFIX_WORD_COUNT} คำ</span></button><button onClick={() => setMode("suffix")} className={`rounded-xl px-4 py-3 text-left transition ${!isPrefix ? "bg-ink text-white shadow-card" : "text-ink/55 hover:bg-ink/5"}`}><span className="block text-sm font-bold">Suffix · คำเติมท้าย</span><span className={`mt-1 block text-xs ${!isPrefix ? "text-white/55" : "text-ink/35"}`}>{SUFFIX_GROUPS.length} กลุ่ม · {SUFFIX_WORD_COUNT} คำ</span></button></div>
+    <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-ink/10 bg-white px-5 py-4 shadow-card"><BookMarked className="text-coral" size={20} /><p className="text-sm font-semibold text-ink/70">{isPrefix ? <>Prefix คือส่วนที่เติมหน้าคำศัพท์ เช่น <strong>re-</strong> แปลว่า “อีกครั้ง” ดังนั้น <strong>rewrite</strong> คือ “เขียนใหม่”</> : <>Suffix คือส่วนที่เติมท้ายคำศัพท์ เช่น <strong>-ness</strong> แปลว่า “สภาวะหรือคุณสมบัติ” ดังนั้น <strong>kindness</strong> คือ “ความเมตตา”</>}</p></div>
     <div className="mt-7 grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
-      <aside className="rounded-[28px] border border-ink/10 bg-white p-4 shadow-card"><div className="flex items-center justify-between px-2"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-coral">20 groups</p><h2 className="mt-1 font-display text-xl font-bold">เลือก Prefix</h2></div><span className="rounded-full bg-lilac px-2.5 py-1 text-xs font-bold">{groupIndex + 1}/20</span></div><div className="mt-4 max-h-[560px] space-y-1 overflow-y-auto pr-1">{PREFIX_GROUPS.map((item, index) => <button key={item.prefix} onClick={() => chooseGroup(index)} className={`w-full rounded-2xl px-3 py-3 text-left transition ${index === groupIndex ? "bg-ink text-white shadow-card" : "text-ink/60 hover:bg-ink/5 hover:text-ink"}`}><span className="block font-bold">{item.prefix}</span><span className={`mt-1 block text-xs ${index === groupIndex ? "text-white/55" : "text-ink/40"}`}>{item.meaning}</span></button>)}</div></aside>
+      <aside className="rounded-[28px] border border-ink/10 bg-white p-4 shadow-card"><div className="flex items-center justify-between px-2"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-coral">{groups.length} groups · {wordCount} words</p><h2 className="mt-1 font-display text-xl font-bold">เลือก {isPrefix ? "Prefix" : "Suffix"}</h2></div><span className="rounded-full bg-lilac px-2.5 py-1 text-xs font-bold">{groupIndex + 1}/{groups.length}</span></div><div className="mt-4 max-h-[560px] space-y-1 overflow-y-auto pr-1">{groups.map((item, index) => <button key={item.prefix} onClick={() => chooseGroup(index)} className={`w-full rounded-2xl px-3 py-3 text-left transition ${index === groupIndex ? "bg-ink text-white shadow-card" : "text-ink/60 hover:bg-ink/5 hover:text-ink"}`}><span className="block font-bold">{item.prefix}</span><span className={`mt-1 block text-xs ${index === groupIndex ? "text-white/55" : "text-ink/40"}`}>{item.meaning}</span></button>)}</div></aside>
       <section className="min-w-0 rounded-[28px] border border-ink/10 bg-white p-5 shadow-card sm:p-7"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-coral">group {groupIndex + 1} · {group.examples.length} examples</p><h2 className="mt-2 font-display text-4xl font-bold">{group.prefix}</h2><p className="mt-2 text-sm font-semibold text-ink/50">ความหมาย: {group.meaning}</p></div><button onClick={randomExample} className="flex w-fit items-center gap-2 rounded-xl border border-ink/10 px-3 py-2 text-xs font-bold text-ink/60 transition hover:border-coral/40 hover:text-coral"><Sparkles size={14} /> สุ่มคำ</button></div>
-        <div className="mt-7 rounded-[26px] bg-ink p-6 text-white sm:p-9"><div className="flex flex-wrap items-center justify-between gap-2"><span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-bold text-white/60">ตัวอย่างที่ {exampleIndex + 1} / {group.examples.length}</span><div className="flex flex-wrap gap-2"><VoiceButton text={example[0]} lang="en-US" label="ฟังคำศัพท์ภาษาอังกฤษ" /><VoiceButton text={example[1]} lang="th-TH" label="ฟังคำแปลภาษาไทย" /></div></div><p className="mt-8 text-xs font-bold uppercase tracking-[0.16em] text-white/40">คำที่มี Prefix นี้</p><h3 className="mt-3 break-words font-display text-4xl font-bold tracking-[-0.04em] sm:text-5xl">{example[0]}</h3><div className="mt-7 min-h-16 rounded-2xl bg-white/10 px-5 py-4">{showMeaning ? <p className="text-lg font-semibold">{example[1]}</p> : <button onClick={() => setShowMeaning(true)} className="text-sm font-bold text-white/65 transition hover:text-white">กดเพื่อดูคำแปลภาษาไทย <span className="ml-1 text-white/35">space</span></button>}</div><div className="mt-7 flex flex-wrap gap-2"><button onClick={() => setShowMeaning((value) => !value)} className="rounded-xl bg-white px-4 py-2.5 text-xs font-bold text-ink">{showMeaning ? "ซ่อนคำแปล" : "แสดงคำแปล"}</button><button onClick={nextExample} className="flex items-center gap-2 rounded-xl bg-coral px-4 py-2.5 text-xs font-bold text-white">คำถัดไป <ArrowRight size={14} /></button></div></div>
+        <div className="mt-7 rounded-[26px] bg-ink p-6 text-white sm:p-9"><div className="flex flex-wrap items-center justify-between gap-2"><span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-bold text-white/60">ตัวอย่างที่ {exampleIndex + 1} / {group.examples.length}</span><div className="flex flex-wrap gap-2"><VoiceButton text={example[0]} lang="en-US" label="ฟังคำศัพท์ภาษาอังกฤษ" /><VoiceButton text={example[1]} lang="th-TH" label="ฟังคำแปลภาษาไทย" /></div></div><p className="mt-8 text-xs font-bold uppercase tracking-[0.16em] text-white/40">คำที่มี {isPrefix ? "Prefix" : "Suffix"} นี้</p><h3 className="mt-3 break-words font-display text-4xl font-bold tracking-[-0.04em] sm:text-5xl">{example[0]}</h3><div className="mt-7 min-h-16 rounded-2xl bg-white/10 px-5 py-4">{showMeaning ? <p className="text-lg font-semibold">{example[1]}</p> : <button onClick={() => setShowMeaning(true)} className="text-sm font-bold text-white/65 transition hover:text-white">กดเพื่อดูคำแปลภาษาไทย <span className="ml-1 text-white/35">space</span></button>}</div><div className="mt-7 flex flex-wrap gap-2"><button onClick={() => setShowMeaning((value) => !value)} className="rounded-xl bg-white px-4 py-2.5 text-xs font-bold text-ink">{showMeaning ? "ซ่อนคำแปล" : "แสดงคำแปล"}</button><button onClick={nextExample} className="flex items-center gap-2 rounded-xl bg-coral px-4 py-2.5 text-xs font-bold text-white">คำถัดไป <ArrowRight size={14} /></button></div></div>
         <div className="mt-6"><p className="text-xs font-bold uppercase tracking-[0.16em] text-ink/35">คำศัพท์ในกลุ่ม {group.prefix}</p><div className="mt-3 grid gap-2 sm:grid-cols-2">{group.examples.map((item, index) => <button key={item[0]} onClick={() => chooseExample(index)} className={`flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left transition ${index === exampleIndex ? "border-coral bg-coral/5" : "border-ink/8 hover:border-coral/40"}`}><span className="min-w-0"><span className="block truncate text-sm font-bold">{item[0]}</span><span className="mt-1 block truncate text-xs text-ink/45">{item[1]}</span></span><span className="shrink-0 text-xs font-bold text-ink/25">{index + 1}</span></button>)}</div></div>
       </section>
     </div>
